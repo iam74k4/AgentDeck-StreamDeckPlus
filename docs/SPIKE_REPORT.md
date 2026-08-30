@@ -84,6 +84,10 @@ detached HEAD、コミット0件、CRLF、conflicted（`u`行）、ignored（`!`
 指示書 §3 の成功条件は「実機Stream Deck Plus上に `CODEX / ● WORKING or IDLE /
 Usage xx%` が表示され、STOPキーで実行中Turnを中断できること」である。
 
+下図は実際のRenderer出力（`npm run preview` で再生成可能）。
+
+![AgentDeckのキーとTouch Strip](images/deck.svg)
+
 **ソフトウェア側は成立している。** `tests/integration/spike-acceptance.test.ts` が、
 実プロセス（app-serverのワイヤ形式を話す子プロセス）・実サービス・実Coordinatorを
 通して以下を検証している。

@@ -60,17 +60,51 @@ function text(
 	return `<text x="${SIZE / 2}" y="${y}" font-size="${size}" font-weight="${weight}" fill="${color}">${escapeXml(value)}</text>`;
 }
 
-/** Design §12.1 — `CODEX / ● WORKING / 02:18`. */
+/**
+ * Approximate advance width for the key font.
+ *
+ * SVG cannot measure text, and these keys carry short uppercase labels, so a
+ * per-character estimate is enough to lay out a dot beside a label without the
+ * two colliding.
+ */
+function estimateWidth(value: string, size: number): number {
+	return value.length * size * 0.66;
+}
+
+/**
+ * Design §12.1 — `CODEX / ● WORKING / 02:18`.
+ *
+ * The status dot and the state label are laid out as one centred unit, and the
+ * label shrinks until the pair fits: a fixed dot position collided with any
+ * label longer than about six characters.
+ */
 export function renderAgentStatusKey(vm: AgentStatusViewModel): string {
+	const label = fit(vm.stateLabel, 11);
+	const dotRadius = 7;
+	const gap = 9;
+	const available = SIZE - 24;
+
+	let size = 22;
+	while (size > 13 && dotRadius * 2 + gap + estimateWidth(label, size) > available) {
+		size -= 1;
+	}
+
+	const unitWidth = dotRadius * 2 + gap + estimateWidth(label, size);
+	const left = (SIZE - unitWidth) / 2;
+
 	const parts = [
 		text(fit(vm.providerLabel.toUpperCase(), 10), 34, 20, Palette.textMuted, "600"),
-		`<circle cx="26" cy="70" r="9" fill="${vm.color}"/>`,
-		text(fit(vm.stateLabel, 11), 78, 22, Palette.text, "700"),
+		`<circle cx="${round(left + dotRadius)}" cy="72" r="${dotRadius}" fill="${vm.color}"/>`,
+		`<text x="${round(left + dotRadius * 2 + gap)}" y="79" font-size="${size}" font-weight="700" fill="${Palette.text}" text-anchor="start">${escapeXml(label)}</text>`,
 	];
 	if (vm.detail.length > 0) {
 		parts.push(text(fit(vm.detail, 14), 112, 18, Palette.textMuted, "400"));
 	}
 	return svgToDataUri(frame(parts.join("")));
+}
+
+function round(value: number): number {
+	return Math.round(value * 10) / 10;
 }
 
 /** Design §12.2 — STOP renders dimmed when there is nothing to interrupt. */

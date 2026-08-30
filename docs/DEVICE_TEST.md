@@ -34,22 +34,18 @@ npx @elgato/cli restart com.agentdeck.streamdeck-plus
 
 ## 2. Profile 配置
 
-推奨配置（設計書 §6.1 / 指示書 §8.1 のSpike版）:
+推奨配置（設計書 §6.1 / 指示書 §8.1 のSpike版）。下図は実際のRendererが
+出力する画（`npm run preview` で再生成できる）である。
 
-```text
-Keys
-┌──────────┬──────────┬──────────┬──────────┐
-│ Agent    │ STOP     │ Usage    │ Git      │
-│ Status   │          │          │          │
-└──────────┴──────────┴──────────┴──────────┘
+![AgentDeckを載せたStream Deck +](images/deck.svg)
 
-Dials (Dashboard Segment を4つ)
-┌──────────┬──────────┬──────────┬──────────┐
-│ USAGE    │ AGENT    │ GIT      │ CODEX    │
-│ 41%      │ IDLE     │ main M:0 │ READY    │
-│ 5h       │          │ ↑0 ↓0    │          │
-└──────────┴──────────┴──────────┴──────────┘
-```
+上段4キーが日常操作、下段は同じAction種別を別設定で並べた例。
+Touch Stripは4本すべてに Dashboard Segment を置くと1枚のダッシュボードとして
+協調動作し、3本以下なら各Actionの `Segment` 設定に従う。
+
+状態語彙は次のとおり。
+
+![各状態のキー表示](images/states.svg)
 
 Git Action と Dashboard Segment の Property Inspector に、
 Git作業ツリーの絶対パスを設定する。

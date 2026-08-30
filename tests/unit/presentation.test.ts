@@ -177,6 +177,37 @@ describe("key rendering", () => {
 		expect(image).toContain("&lt;X&gt;");
 	});
 
+	it("keeps the status dot clear of the state label at every length", () => {
+		// A fixed dot position collided with anything longer than about six
+		// characters, which covered most of the state vocabulary.
+		for (const stateLabel of ["IDLE", "WORKING", "APPROVAL", "NO SESSION", "OFFLINE"]) {
+			const svg = decodeURIComponent(
+				renderAgentStatusKey({
+					providerLabel: "Codex",
+					stateLabel,
+					detail: "",
+					color: "#2fbf71",
+					interruptible: false,
+				}),
+			);
+
+			const dot = /<circle cx="([\d.]+)" cy="[\d.]+" r="([\d.]+)"/.exec(svg);
+			const text = /<text x="([\d.]+)" y="79" font-size="([\d.]+)"/.exec(svg);
+			expect(dot, stateLabel).not.toBeNull();
+			expect(text, stateLabel).not.toBeNull();
+
+			const dotRight = Number(dot?.[1]) + Number(dot?.[2]);
+			const textLeft = Number(text?.[1]);
+			expect(textLeft, `${stateLabel} overlaps the dot`).toBeGreaterThan(dotRight);
+
+			// The whole unit stays inside the 144px key.
+			const size = Number(text?.[2]);
+			const textRight = textLeft + stateLabel.length * size * 0.66;
+			expect(textRight, `${stateLabel} overflows the key`).toBeLessThanOrEqual(144);
+			expect(Number(dot?.[1]) - Number(dot?.[2]), `${stateLabel} starts off-key`).toBeGreaterThanOrEqual(0);
+		}
+	});
+
 	it("truncates rather than overflowing a key", () => {
 		expect(fit("short", 10)).toBe("short");
 		expect(fit("a-very-long-branch-name", 10)).toBe("a-very-lo…");

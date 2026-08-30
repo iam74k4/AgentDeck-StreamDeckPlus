@@ -1,7 +1,7 @@
 {
 	"name": "agentdeck-streamdeck-plus",
 	"version": "0.0.1",
-	"description": "AgentDeck — control and monitor AI coding agents from an Elgato Stream Deck Plus.",
+	"description": "AgentDeck \u2014 control and monitor AI coding agents from an Elgato Stream Deck Plus.",
 	"license": "MIT",
 	"private": true,
 	"type": "module",
@@ -19,6 +19,7 @@
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"icons": "node scripts/generate-icons.mjs",
+		"preview": "node scripts/generate-preview.mjs",
 		"codex:generate-types": "node scripts/generate-codex-types.mjs",
 		"verify": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run build"
 	},

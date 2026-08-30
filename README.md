@@ -8,18 +8,9 @@ deck answers four questions without a context switch: what is the agent doing,
 how much quota is left, what does the working tree look like, and how do I stop
 it right now.
 
-```text
-┌──────────┬──────────┬──────────┬──────────┐
-│ Agent    │  STOP    │  Usage   │   Git    │
-│ ● WORKING│          │   41%    │  main    │
-│  02:18   │          │   5h     │  M:4     │
-└──────────┴──────────┴──────────┴──────────┘
-┌──────────┬──────────┬──────────┬──────────┐
-│ USAGE    │ AGENT    │ GIT      │ CODEX    │
-│ 41%      │ WORKING  │ main M:4 │ READY    │
-│ 5h       │ 02:18    │ ↑1 ↓0    │          │
-└──────────┴──────────┴──────────┴──────────┘
-```
+![A Stream Deck + running AgentDeck: eight keys showing agent status, stop, usage and git, above a four-segment touch strip](docs/images/deck.svg)
+
+<sub>All eight keys are the same four action types with different settings, and every reading is one Codex account at 41% of its 5h window and 96% of its 7d window. Generated from the shipped renderers by <code>npm run preview</code>.</sub>
 
 - **Design document (source of truth):** [`AGENTDECK_DESIGN.md`](./AGENTDECK_DESIGN.md)
 - **Implementation brief:** [`docs/AGENTDECK_CLAUDE_INSTRUCTIONS.md`](./docs/AGENTDECK_CLAUDE_INSTRUCTIONS.md)
@@ -66,6 +57,7 @@ npx @elgato/cli restart com.agentdeck.streamdeck-plus
 | `npm run build`                | bundle `src/plugin.ts` into the `.sdPlugin` folder              |
 | `npm run watch`                | rebuild and restart the plugin on change                        |
 | `npm test`                     | unit and integration tests                                      |
+| `npm run preview`              | regenerate the documentation images in `docs/images/`           |
 | `npm run icons`                | regenerate the manifest PNG assets                              |
 | `npm run codex:generate-types` | write official Codex protocol types into `src/generated/codex/` |
 
@@ -78,6 +70,24 @@ npx @elgato/cli restart com.agentdeck.streamdeck-plus
 | Usage             | Key        | One rate-limit window, auto or pinned. Press refreshes.              |
 | Git Status        | Key        | Branch and working-tree counts. Press refreshes.                     |
 | Dashboard Segment | Encoder    | One touch-strip segment; four of them form a single dashboard.       |
+
+## How the deck reads
+
+Every state is a colour and one short word. Nothing on the deck needs reading
+twice, and nothing needs scrolling — long output belongs in Codex or the editor,
+not here (design §3.5).
+
+![Key faces for each state: idle, working, approval, done, error, offline, CLI not found, login required, stale and rate-limited](docs/images/states.svg)
+
+The top row is the agent's own state; the bottom row is everything that can go
+wrong around it. A provider problem outranks a stale session, so `CLI?` and
+`LOGIN` replace the session state rather than sitting beside it — and a failed
+refresh keeps the last good number under a `STALE` badge instead of blanking the
+key.
+
+Both images come from `npm run preview`, which runs the real `key-renderer` and
+`encoder-renderer` and draws the touch strip through the same
+`layouts/segment.json` the device uses, so they cannot drift from the code.
 
 ## Architecture
 
