@@ -1,0 +1,186 @@
+/**
+ * Child-process lifecycle — design §9.5, instructions §7.2 / §7.5.
+ *
+ * Owns spawn and shutdown only. Framing and JSON-RPC live one layer up, so this
+ * module stays reusable for any stdio-based provider.
+ *
+ * Shutdown order (design §9.5): close stdin → terminate → force kill on timeout.
+ */
+
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import type { Readable, Writable } from "node:stream";
+import { AgentDeckError } from "../domain/errors.js";
+import type { Logger } from "./logger.js";
+
+export interface ProcessExit {
+	code: number | null;
+	signal: NodeJS.Signals | null;
+}
+
+export interface SpawnOptions {
+	command: string;
+	args?: readonly string[];
+	cwd?: string;
+	env?: NodeJS.ProcessEnv;
+	logger?: Logger;
+	/** Milliseconds to wait after closing stdin before escalating. Default 3000. */
+	shutdownGraceMs?: number;
+}
+
+export interface ManagedProcess {
+	readonly pid: number | undefined;
+	readonly stdin: Writable;
+	readonly stdout: Readable;
+	readonly stderr: Readable;
+	/** Resolves when the child exits, whether cleanly or not. Never rejects. */
+	readonly exited: Promise<ProcessExit>;
+	readonly running: boolean;
+	/** Graceful shutdown; resolves once the child has exited or has been killed. */
+	shutdown(): Promise<ProcessExit>;
+}
+
+class NodeManagedProcess implements ManagedProcess {
+	readonly #child: ChildProcessWithoutNullStreams;
+	readonly #graceMs: number;
+	readonly #logger: Logger | undefined;
+	readonly #exited: Promise<ProcessExit>;
+	#running = true;
+	#shutdownPromise: Promise<ProcessExit> | undefined;
+
+	public constructor(child: ChildProcessWithoutNullStreams, graceMs: number, logger?: Logger) {
+		this.#child = child;
+		this.#graceMs = graceMs;
+		this.#logger = logger;
+
+		this.#exited = new Promise<ProcessExit>((resolve) => {
+			const settle = (code: number | null, signal: NodeJS.Signals | null): void => {
+				this.#running = false;
+				resolve({ code, signal });
+			};
+			child.once("exit", settle);
+			// `error` fires instead of `exit` when the binary cannot be started at all.
+			child.once("error", (error) => {
+				this.#logger?.warn("child process error", error);
+				settle(null, null);
+			});
+		});
+
+		// A crashed provider must never take the plugin down (instructions §7.5).
+		child.stdin.on("error", (error) => this.#logger?.debug("stdin error", error));
+		child.stdout.on("error", (error) => this.#logger?.debug("stdout error", error));
+		child.stderr.on("error", (error) => this.#logger?.debug("stderr error", error));
+	}
+
+	public get pid(): number | undefined {
+		return this.#child.pid;
+	}
+
+	public get stdin(): Writable {
+		return this.#child.stdin;
+	}
+
+	public get stdout(): Readable {
+		return this.#child.stdout;
+	}
+
+	public get stderr(): Readable {
+		return this.#child.stderr;
+	}
+
+	public get exited(): Promise<ProcessExit> {
+		return this.#exited;
+	}
+
+	public get running(): boolean {
+		return this.#running;
+	}
+
+	public shutdown(): Promise<ProcessExit> {
+		this.#shutdownPromise ??= this.#doShutdown();
+		return this.#shutdownPromise;
+	}
+
+	async #doShutdown(): Promise<ProcessExit> {
+		if (!this.#running) {
+			return this.#exited;
+		}
+
+		try {
+			this.#child.stdin.end();
+		} catch (error) {
+			this.#logger?.debug("failed to close stdin", error);
+		}
+
+		const graceful = await withTimeout(this.#exited, this.#graceMs);
+		if (graceful !== TIMED_OUT) {
+			return graceful;
+		}
+
+		this.#logger?.warn("provider process did not exit after stdin close; terminating");
+		this.#signal("SIGTERM");
+
+		const terminated = await withTimeout(this.#exited, this.#graceMs);
+		if (terminated !== TIMED_OUT) {
+			return terminated;
+		}
+
+		this.#logger?.warn("provider process did not respond to SIGTERM; force killing");
+		this.#signal("SIGKILL");
+		return this.#exited;
+	}
+
+	#signal(signal: NodeJS.Signals): void {
+		try {
+			this.#child.kill(signal);
+		} catch (error) {
+			this.#logger?.debug(`failed to send ${signal}`, error);
+		}
+	}
+}
+
+const TIMED_OUT = Symbol("timed-out");
+
+async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | typeof TIMED_OUT> {
+	let timer: NodeJS.Timeout | undefined;
+	const timeout = new Promise<typeof TIMED_OUT>((resolve) => {
+		timer = setTimeout(() => resolve(TIMED_OUT), ms);
+		timer.unref?.();
+	});
+	try {
+		return await Promise.race([promise, timeout]);
+	} finally {
+		if (timer !== undefined) {
+			clearTimeout(timer);
+		}
+	}
+}
+
+/**
+ * Spawns a child process.
+ *
+ * A missing executable surfaces as `CLI_NOT_FOUND` on {@link ManagedProcess.exited}
+ * consumers rather than as an unhandled `error` event.
+ */
+export function spawnManagedProcess(options: SpawnOptions): ManagedProcess {
+	const child = spawn(options.command, [...(options.args ?? [])], {
+		cwd: options.cwd,
+		env: options.env ?? process.env,
+		stdio: ["pipe", "pipe", "pipe"],
+		windowsHide: true,
+		shell: false,
+	}) as ChildProcessWithoutNullStreams;
+
+	return new NodeManagedProcess(child, options.shutdownGraceMs ?? 3_000, options.logger);
+}
+
+/** Translates a Node spawn failure into the typed error surface (instructions §10). */
+export function spawnErrorToAgentDeckError(error: unknown, command: string): AgentDeckError {
+	const code = (error as NodeJS.ErrnoException | undefined)?.code;
+	if (code === "ENOENT") {
+		return new AgentDeckError("CLI_NOT_FOUND", `Executable not found: ${command}`, { cause: error });
+	}
+	if (code === "EACCES" || code === "EPERM") {
+		return new AgentDeckError("CLI_NOT_FOUND", `Executable not runnable: ${command}`, { cause: error });
+	}
+	return new AgentDeckError("PROVIDER_OFFLINE", `Failed to start ${command}`, { cause: error });
+}

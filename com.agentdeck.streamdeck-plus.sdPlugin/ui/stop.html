@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<title>Stop Agent</title>
+		<link rel="stylesheet" href="lib/pi.css" />
+	</head>
+	<body>
+		<h1>Stop Agent</h1>
+		<div class="row">
+			<label for="provider">Provider</label>
+			<select id="provider" data-setting="providerId">
+				<option value="">Default (Codex)</option>
+				<option value="codex">Codex</option>
+			</select>
+		</div>
+		<p class="hint">
+			Interrupts the active session's in-flight turn. The key dims when there is nothing to stop.
+		</p>
+		<fieldset>
+			<legend>Plugin settings</legend>
+			<div class="row">
+				<label for="codex-exe">Codex CLI</label>
+				<input
+					id="codex-exe"
+					type="text"
+					placeholder="codex"
+					data-setting="codexExecutable"
+					data-scope="global"
+				/>
+			</div>
+			<p class="hint">Leave empty to use <code>codex</code> from PATH.</p>
+			<div class="row">
+				<label for="codex-health">Health check</label>
+				<input
+					id="codex-health"
+					type="number"
+					min="15000"
+					step="15000"
+					placeholder="120000"
+					data-setting="codexHealthCheckIntervalMs"
+					data-scope="global"
+				/>
+			</div>
+			<p class="hint">Milliseconds between background usage refreshes.</p>
+			<div class="row">
+				<label for="debug">Debug logging</label>
+				<input id="debug" type="checkbox" data-setting="debugLogging" data-scope="global" />
+			</div>
+			<p class="hint">Credentials are redacted at every log level.</p>
+		</fieldset>
+		<script src="lib/pi.js"></script>
+	</body>
+</html>

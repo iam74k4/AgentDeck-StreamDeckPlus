@@ -1,0 +1,158 @@
+/**
+ * Minimal Property Inspector runtime.
+ *
+ * Self-contained on purpose: no CDN component library, so the settings UI keeps
+ * working offline and the plugin ships without a third-party runtime dependency.
+ *
+ * Elements opt in with `data-setting="<key>"`; `data-scope="global"` targets the
+ * plugin's global settings (design §23.1) instead of the action's (design §23.2).
+ */
+(function () {
+	"use strict";
+
+	var socket = null;
+	var uuid = null;
+	var registerEvent = null;
+	var actionInfo = null;
+	var settings = {};
+	var globalSettings = {};
+	var readyCallbacks = [];
+	var connected = false;
+
+	function send(payload) {
+		if (socket && socket.readyState === 1) {
+			socket.send(JSON.stringify(payload));
+		}
+	}
+
+	function setSettings(next) {
+		settings = next;
+		send({ event: "setSettings", context: uuid, payload: settings });
+	}
+
+	function setGlobalSettings(next) {
+		globalSettings = next;
+		send({ event: "setGlobalSettings", context: uuid, payload: globalSettings });
+	}
+
+	function coerce(element) {
+		if (element.type === "checkbox") {
+			return element.checked;
+		}
+		if (element.type === "number" || element.dataset.type === "number") {
+			var parsed = Number.parseFloat(element.value);
+			return Number.isFinite(parsed) ? parsed : undefined;
+		}
+		return element.value === "" ? undefined : element.value;
+	}
+
+	function applyTo(element) {
+		var scope = element.dataset.scope === "global" ? globalSettings : settings;
+		var value = scope[element.dataset.setting];
+		if (element.type === "checkbox") {
+			element.checked = value === true;
+			return;
+		}
+		element.value = value === undefined || value === null ? "" : String(value);
+	}
+
+	function writeBack(element) {
+		var key = element.dataset.setting;
+		var value = coerce(element);
+		var isGlobal = element.dataset.scope === "global";
+		var next = Object.assign({}, isGlobal ? globalSettings : settings);
+		if (value === undefined) {
+			delete next[key];
+		} else {
+			next[key] = value;
+		}
+		if (isGlobal) {
+			setGlobalSettings(next);
+		} else {
+			setSettings(next);
+		}
+	}
+
+	function bind() {
+		Array.prototype.forEach.call(document.querySelectorAll("[data-setting]"), function (element) {
+			applyTo(element);
+			var eventName = element.tagName === "SELECT" || element.type === "checkbox" ? "change" : "input";
+			element.addEventListener(eventName, function () {
+				writeBack(element);
+				refreshConditionals();
+			});
+		});
+		refreshConditionals();
+	}
+
+	/** Shows or hides rows whose `data-when="<key>=<value>"` condition is unmet. */
+	function refreshConditionals() {
+		Array.prototype.forEach.call(document.querySelectorAll("[data-when]"), function (row) {
+			var parts = row.dataset.when.split("=");
+			var control = document.querySelector('[data-setting="' + parts[0] + '"]');
+			row.hidden = !control || control.value !== parts[1];
+		});
+	}
+
+	function ready() {
+		connected = true;
+		bind();
+		readyCallbacks.forEach(function (callback) {
+			callback({ settings: settings, globalSettings: globalSettings, actionInfo: actionInfo });
+		});
+	}
+
+	window.connectElgatoStreamDeckSocket = function (port, inUuid, inRegisterEvent, _inInfo, inActionInfo) {
+		uuid = inUuid;
+		registerEvent = inRegisterEvent;
+		try {
+			actionInfo = inActionInfo ? JSON.parse(inActionInfo) : null;
+			settings = (actionInfo && actionInfo.payload && actionInfo.payload.settings) || {};
+		} catch {
+			settings = {};
+		}
+
+		socket = new WebSocket("ws://127.0.0.1:" + port);
+		socket.onopen = function () {
+			send({ event: registerEvent, uuid: uuid });
+			send({ event: "getGlobalSettings", context: uuid });
+		};
+		socket.onmessage = function (message) {
+			var data;
+			try {
+				data = JSON.parse(message.data);
+			} catch {
+				return;
+			}
+			if (data.event === "didReceiveGlobalSettings") {
+				globalSettings = (data.payload && data.payload.settings) || {};
+				if (connected) {
+					Array.prototype.forEach.call(document.querySelectorAll('[data-scope="global"]'), applyTo);
+				} else {
+					ready();
+				}
+				return;
+			}
+			if (data.event === "didReceiveSettings") {
+				settings = (data.payload && data.payload.settings) || {};
+				Array.prototype.forEach.call(
+					document.querySelectorAll("[data-setting]:not([data-scope='global'])"),
+					applyTo,
+				);
+				refreshConditionals();
+			}
+		};
+	};
+
+	window.AgentDeckPI = {
+		onReady: function (callback) {
+			if (connected) {
+				callback({ settings: settings, globalSettings: globalSettings, actionInfo: actionInfo });
+				return;
+			}
+			readyCallbacks.push(callback);
+		},
+		setSettings: setSettings,
+		setGlobalSettings: setGlobalSettings,
+	};
+})();

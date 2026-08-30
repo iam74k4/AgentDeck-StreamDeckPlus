@@ -1,0 +1,114 @@
+{
+	"$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
+	"UUID": "com.agentdeck.streamdeck-plus",
+	"Name": "AgentDeck",
+	"Version": "0.1.0.0",
+	"Author": "AgentDeck",
+	"Description": "Monitor and control local AI coding agents from a Stream Deck +. Agent status, stop, usage and git context.",
+	"Category": "AgentDeck",
+	"CategoryIcon": "imgs/plugin/category",
+	"Icon": "imgs/plugin/icon",
+	"CodePath": "bin/plugin.js",
+	"SDKVersion": 2,
+	"Software": {
+		"MinimumVersion": "6.5"
+	},
+	"OS": [
+		{
+			"Platform": "windows",
+			"MinimumVersion": "10"
+		}
+	],
+	"Nodejs": {
+		"Version": "20",
+		"Debug": "enabled"
+	},
+	"Actions": [
+		{
+			"UUID": "com.agentdeck.streamdeck-plus.agent-status",
+			"Name": "Agent Status",
+			"Tooltip": "Shows the active agent session state. Press to re-read the session list.",
+			"Icon": "imgs/actions/agent/icon",
+			"Controllers": ["Keypad"],
+			"PropertyInspectorPath": "ui/agent-status.html",
+			"SupportedInMultiActions": false,
+			"States": [
+				{
+					"Image": "imgs/actions/agent/key",
+					"TitleAlignment": "middle",
+					"ShowTitle": false
+				}
+			]
+		},
+		{
+			"UUID": "com.agentdeck.streamdeck-plus.stop",
+			"Name": "Stop Agent",
+			"Tooltip": "Interrupts the active agent turn.",
+			"Icon": "imgs/actions/stop/icon",
+			"Controllers": ["Keypad"],
+			"PropertyInspectorPath": "ui/stop.html",
+			"States": [
+				{
+					"Image": "imgs/actions/stop/key",
+					"TitleAlignment": "middle",
+					"ShowTitle": false
+				}
+			]
+		},
+		{
+			"UUID": "com.agentdeck.streamdeck-plus.usage",
+			"Name": "Usage",
+			"Tooltip": "Shows a provider's rate-limit window. Press to refresh.",
+			"Icon": "imgs/actions/usage/icon",
+			"Controllers": ["Keypad"],
+			"PropertyInspectorPath": "ui/usage.html",
+			"States": [
+				{
+					"Image": "imgs/actions/usage/key",
+					"TitleAlignment": "middle",
+					"ShowTitle": false
+				}
+			]
+		},
+		{
+			"UUID": "com.agentdeck.streamdeck-plus.git",
+			"Name": "Git Status",
+			"Tooltip": "Shows branch and working-tree counts for a repository. Press to refresh.",
+			"Icon": "imgs/actions/git/icon",
+			"Controllers": ["Keypad"],
+			"PropertyInspectorPath": "ui/git.html",
+			"States": [
+				{
+					"Image": "imgs/actions/git/key",
+					"TitleAlignment": "middle",
+					"ShowTitle": false
+				}
+			]
+		},
+		{
+			"UUID": "com.agentdeck.streamdeck-plus.dashboard",
+			"Name": "Dashboard Segment",
+			"Tooltip": "One touch-strip segment. Place all four to drive the strip as a single dashboard.",
+			"Icon": "imgs/actions/dashboard/icon",
+			"Controllers": ["Encoder"],
+			"PropertyInspectorPath": "ui/dashboard.html",
+			"SupportedInMultiActions": false,
+			"Encoder": {
+				"layout": "layouts/segment.json",
+				"StackColor": "#101114",
+				"TriggerDescription": {
+					"Rotate": "Change view",
+					"Push": "Refresh",
+					"Touch": "Refresh"
+				}
+			},
+			"States": [
+				{
+					"Image": "imgs/actions/dashboard/key",
+					"TitleAlignment": "middle",
+					"ShowTitle": false
+				}
+			]
+		}
+	]
+}

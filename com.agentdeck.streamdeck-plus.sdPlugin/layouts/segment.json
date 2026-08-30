@@ -1,0 +1,43 @@
+{
+	"$schema": "https://schemas.elgato.com/streamdeck/plugins/layout.json",
+	"id": "agentdeck-segment",
+	"items": [
+		{
+			"key": "title",
+			"type": "text",
+			"rect": [0, 6, 200, 18],
+			"alignment": "center",
+			"color": "#9aa0a6",
+			"font": { "size": 13, "weight": 600 },
+			"value": ""
+		},
+		{
+			"key": "value",
+			"type": "text",
+			"rect": [0, 26, 200, 34],
+			"alignment": "center",
+			"color": "#f2f3f5",
+			"font": { "size": 26, "weight": 700 },
+			"value": ""
+		},
+		{
+			"key": "bar",
+			"type": "bar",
+			"rect": [24, 62, 152, 8],
+			"value": 0,
+			"subtype": 0,
+			"bar_bg_c": "#1b1d22",
+			"bar_fill_c": "#2fbf71",
+			"border_w": 0
+		},
+		{
+			"key": "detail",
+			"type": "text",
+			"rect": [0, 74, 200, 20],
+			"alignment": "center",
+			"color": "#9aa0a6",
+			"font": { "size": 13, "weight": 400 },
+			"value": ""
+		}
+	]
+}

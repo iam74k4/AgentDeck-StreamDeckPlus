@@ -1,0 +1,93 @@
+/**
+ * Touch-strip segment rendering — design §6.2, instructions §8.2.
+ *
+ * Each encoder owns a 200x100 region rendered through the custom
+ * `layouts/segment.json` layout. Segments show state, never prose.
+ *
+ * The returned object is intentionally a plain structure so it can be asserted in
+ * unit tests; it is structurally compatible with the SDK's `FeedbackPayload`.
+ */
+
+import type { AgentStatusViewModel } from "../view-models/agent-status.js";
+import type { GitViewModel } from "../view-models/git.js";
+import type { ProviderViewModel } from "../view-models/provider.js";
+import type { UsageViewModel } from "../view-models/usage.js";
+import { Palette } from "../view-models/colors.js";
+import { fit } from "./key-renderer.js";
+
+export const SEGMENT_LAYOUT_ID = "layouts/segment.json";
+
+export interface SegmentText {
+	value: string;
+	color?: string;
+}
+
+export interface SegmentBar {
+	value: number;
+	bar_fill_c?: string;
+	/** The SDK models opacity as a fixed step scale; the bar is only shown or hidden. */
+	opacity?: 0 | 1;
+}
+
+/**
+ * The index signature keeps this assignable to the SDK's `FeedbackPayload`
+ * without a cast at the call site.
+ */
+export type SegmentFeedback = {
+	title: SegmentText;
+	value: SegmentText;
+	detail: SegmentText;
+	bar: SegmentBar;
+} & Record<string, SegmentText | SegmentBar>;
+
+function segment(
+	title: string,
+	value: string,
+	detail: string,
+	color: string,
+	barPercent = 0,
+	showBar = false,
+): SegmentFeedback {
+	return {
+		title: { value: title, color: Palette.textMuted },
+		value: { value: value, color: Palette.text },
+		detail: { value: detail, color: Palette.textMuted },
+		bar: { value: Math.round(barPercent), bar_fill_c: color, opacity: showBar ? 1 : 0 },
+	};
+}
+
+export function renderUsageSegment(vm: UsageViewModel): SegmentFeedback {
+	// The window label always stays on screen; STALE/LIMIT/reset text appends to it,
+	// so a warning can never hide which window the percentage belongs to.
+	const detail = [vm.windowLabel, vm.detail].filter((part) => part.length > 0).join(" · ");
+	return segment(
+		fit(vm.providerLabel.toUpperCase(), 14),
+		vm.valueText,
+		fit(detail, 20),
+		vm.color,
+		vm.barPercent,
+		vm.available,
+	);
+}
+
+export function renderAgentSegment(vm: AgentStatusViewModel): SegmentFeedback {
+	const feedback = segment("AGENT", fit(vm.stateLabel, 12), fit(vm.detail, 20), vm.color);
+	feedback.value.color = vm.color;
+	return feedback;
+}
+
+export function renderGitSegment(vm: GitViewModel): SegmentFeedback {
+	const detail = [vm.summary, vm.detail].filter((part) => part.length > 0).join("  ");
+	return segment("GIT", fit(vm.branch, 14), fit(detail, 24), vm.color);
+}
+
+export function renderProviderSegment(vm: ProviderViewModel): SegmentFeedback {
+	const feedback = segment(
+		fit(vm.label.toUpperCase(), 14),
+		fit(vm.statusLabel, 12),
+		fit(vm.detail, 20),
+		vm.color,
+	);
+	feedback.value.color = vm.color;
+	return feedback;
+}

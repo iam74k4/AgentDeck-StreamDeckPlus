@@ -1,0 +1,10 @@
+node_modules/
+com.agentdeck.streamdeck-plus.sdPlugin/bin/
+com.agentdeck.streamdeck-plus.sdPlugin/imgs/
+src/generated/codex/
+coverage/
+package-lock.json
+
+# Source-of-truth documents, kept byte-identical to what was handed over.
+AGENTDECK_DESIGN.md
+docs/AGENTDECK_CLAUDE_INSTRUCTIONS.md

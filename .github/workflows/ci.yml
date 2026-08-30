@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      # format → lint → typecheck → unit + integration tests → bundle.
+      # The integration tests spawn a fake Codex app-server and create real git
+      # repositories, so neither the Codex CLI nor a Stream Deck is needed here.
+      - run: npm run verify
+
+      - name: Validate the Stream Deck plugin package
+        run: npx --yes @elgato/cli validate com.agentdeck.streamdeck-plus.sdPlugin
