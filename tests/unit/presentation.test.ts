@@ -283,6 +283,24 @@ describe("four-encoder coordination (design §6.2, instructions §8.3)", () => {
 		expect(healthy.setFeedback).toHaveBeenCalled();
 	});
 
+	it("reports occupancy so callers can idle when no encoder is placed", () => {
+		const changes: boolean[] = [];
+		const coordinator = new PlusDashboardCoordinator({ onOccupancyChange: (o) => changes.push(o) });
+		expect(coordinator.occupied).toBe(false);
+
+		coordinator.register("dev-1", 0, context("a0"));
+		coordinator.register("dev-1", 1, context("a1"));
+		// Only the 0↔1 transitions are reported, not every registration.
+		expect(changes).toEqual([true]);
+
+		coordinator.unregister("dev-1", "a0");
+		expect(changes).toEqual([true]);
+
+		coordinator.unregister("dev-1", "a1");
+		expect(changes).toEqual([true, false]);
+		expect(coordinator.occupied).toBe(false);
+	});
+
 	it("validates encoder columns", () => {
 		expect(isColumn(0)).toBe(true);
 		expect(isColumn(3)).toBe(true);

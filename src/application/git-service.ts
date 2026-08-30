@@ -30,6 +30,9 @@ export interface GitServiceOptions {
 	now?: () => Date;
 }
 
+/** Floor for git polling; a settings typo must not turn into a spawn loop. */
+export const MIN_GIT_POLL_INTERVAL_MS = 5_000;
+
 export class GitService {
 	readonly #adapter: GitAdapter;
 	readonly #cache = new Map<string, GitStatusEntry>();
@@ -37,15 +40,33 @@ export class GitService {
 	readonly #singleFlight = new SingleFlight<string>();
 	readonly #watchers = new Map<string, number>();
 	readonly #logger: Logger | undefined;
-	readonly #pollIntervalMs: number;
 	readonly #now: () => Date;
+	#pollIntervalMs: number;
 	#poll: ScheduledTask | undefined;
 
 	public constructor(adapter: GitAdapter, options: GitServiceOptions = {}) {
 		this.#adapter = adapter;
 		this.#logger = options.logger?.child("git");
-		this.#pollIntervalMs = options.pollIntervalMs ?? 20_000;
+		this.#pollIntervalMs = clampPollInterval(options.pollIntervalMs);
 		this.#now = options.now ?? (() => new Date());
+	}
+
+	/** Applies a changed global setting; restarts the timer when one is running. */
+	public setPollInterval(intervalMs: number | undefined): void {
+		const next = clampPollInterval(intervalMs);
+		if (next === this.#pollIntervalMs) {
+			return;
+		}
+		this.#pollIntervalMs = next;
+		if (this.#poll !== undefined) {
+			this.#poll.stop();
+			this.#poll = undefined;
+			this.#ensurePolling();
+		}
+	}
+
+	public get pollIntervalMs(): number {
+		return this.#pollIntervalMs;
 	}
 
 	public subscribe(listener: GitListener): Unsubscribe {
@@ -126,4 +147,11 @@ export class GitService {
 			}
 		}
 	}
+}
+
+function clampPollInterval(intervalMs: number | undefined): number {
+	if (typeof intervalMs !== "number" || !Number.isFinite(intervalMs)) {
+		return 20_000;
+	}
+	return Math.max(MIN_GIT_POLL_INTERVAL_MS, intervalMs);
 }

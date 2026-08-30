@@ -48,5 +48,8 @@ export interface DashboardEncoderSettings {
 	segment?: SegmentKind;
 	providerId?: string;
 	repositoryPath?: string;
+	/** Set by rotating a usage segment; `auto` follows the most constrained window. */
+	windowMode?: "auto" | "pinned";
+	windowId?: string;
 	[key: string]: SettingsValue;
 }

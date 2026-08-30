@@ -47,6 +47,10 @@
 	}
 
 	function applyTo(element) {
+		// Never overwrite the field the user is currently editing.
+		if (document.activeElement === element) {
+			return;
+		}
 		var scope = element.dataset.scope === "global" ? globalSettings : settings;
 		var value = scope[element.dataset.setting];
 		if (element.type === "checkbox") {
@@ -73,13 +77,47 @@
 		}
 	}
 
+	/**
+	 * Text fields are debounced before the settings are written.
+	 *
+	 * Without it, typing `codex` into the executable field saves five times, and
+	 * each save restarts the Codex app-server — the deck flashes CLI? per keystroke
+	 * while five child processes are spawned and torn down. Selects and checkboxes
+	 * are single, deliberate choices and are written immediately.
+	 */
+	var WRITE_DEBOUNCE_MS = 400;
+
 	function bind() {
 		Array.prototype.forEach.call(document.querySelectorAll("[data-setting]"), function (element) {
 			applyTo(element);
-			var eventName = element.tagName === "SELECT" || element.type === "checkbox" ? "change" : "input";
-			element.addEventListener(eventName, function () {
+
+			var immediate = element.tagName === "SELECT" || element.type === "checkbox";
+			if (immediate) {
+				element.addEventListener("change", function () {
+					writeBack(element);
+					refreshConditionals();
+				});
+				return;
+			}
+
+			var timer = null;
+			var flush = function () {
+				timer = null;
 				writeBack(element);
 				refreshConditionals();
+			};
+			element.addEventListener("input", function () {
+				if (timer !== null) {
+					clearTimeout(timer);
+				}
+				timer = setTimeout(flush, WRITE_DEBOUNCE_MS);
+			});
+			// Leaving the field commits straight away rather than waiting out the timer.
+			element.addEventListener("change", function () {
+				if (timer !== null) {
+					clearTimeout(timer);
+				}
+				flush();
 			});
 		});
 		refreshConditionals();

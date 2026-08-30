@@ -69,16 +69,21 @@ describe("git status porcelain v2 (design §16.1)", () => {
 		expect(status.branch).toBe("main");
 		expect(status.upstream).toBeUndefined();
 		expect(status.ahead).toBe(0);
+		// A fresh repository is on a branch; it is not detached.
+		expect(status.hasCommits).toBe(false);
+		expect(status.detached).toBe(false);
+	});
+
+	it("reports hasCommits for a repository with history", () => {
+		expect(parseGitStatusPorcelainV2(CLEAN, "/repo").hasCommits).toBe(true);
 	});
 
 	it("tolerates CRLF line endings", () => {
 		expect(parseGitStatusPorcelainV2(CLEAN.replace(/\n/g, "\r\n"), "/repo").branch).toBe("main");
 	});
 
-	it("maps a non-repository failure onto the typed error code", () => {
-		expect(
-			gitFailureToError("fatal: not a git repository (or any of the parent directories)", "/tmp").code,
-		).toBe("GIT_NOT_REPOSITORY");
-		expect(gitFailureToError("something else went wrong", "/tmp").code).toBe("UNKNOWN");
+	it("classifies a failure by whether the path is a work tree, not by message text", () => {
+		expect(gitFailureToError("/tmp", false).code).toBe("GIT_NOT_REPOSITORY");
+		expect(gitFailureToError("/repo", true).code).toBe("UNKNOWN");
 	});
 });

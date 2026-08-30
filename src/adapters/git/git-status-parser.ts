@@ -17,6 +17,7 @@ export function parseGitStatusPorcelainV2(stdout: string, repositoryPath: string
 	const status: GitStatus = {
 		repositoryPath,
 		detached: false,
+		hasCommits: true,
 		modified: 0,
 		staged: 0,
 		untracked: 0,
@@ -77,9 +78,9 @@ function applyHeader(header: string, status: GitStatus): void {
 			}
 			return;
 		case "branch.oid":
-			// `(initial)` marks a repository with no commits yet.
+			// git reports `(initial)` in place of a sha until the first commit lands.
 			if (value === "(initial)") {
-				status.detached = false;
+				status.hasCommits = false;
 			}
 			return;
 		case "branch.upstream":

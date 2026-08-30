@@ -7,8 +7,10 @@
 export interface GitStatus {
 	repositoryPath: string;
 	branch?: string;
-	/** True while the repository has no commits yet, or HEAD is detached. */
+	/** True only while HEAD is detached. A fresh repository still has a branch. */
 	detached: boolean;
+	/** False for a repository that has been `git init`ed but has no commits yet. */
+	hasCommits: boolean;
 	modified: number;
 	staged: number;
 	untracked: number;
@@ -20,18 +22,19 @@ export interface GitStatus {
 
 /** Design §16.1 — `main | M:4 | S:2 | U:1 | ↑1 ↓0` */
 export function formatGitSummary(status: GitStatus): string {
-	const branch = status.branch ?? (status.detached ? "detached" : "--");
-	return [
-		branch,
-		`M:${status.modified}`,
-		`S:${status.staged}`,
-		`U:${status.untracked}`,
-		`↑${status.ahead} ↓${status.behind}`,
-	].join(" | ");
+	const parts = [branchLabel(status), `M:${status.modified}`, `S:${status.staged}`, `U:${status.untracked}`];
+	// Ahead/behind is meaningless before the first commit, so it is left off.
+	if (status.hasCommits) {
+		parts.push(`↑${status.ahead} ↓${status.behind}`);
+	}
+	return parts.join(" | ");
+}
+
+export function branchLabel(status: GitStatus): string {
+	return status.branch ?? (status.detached ? "detached" : "--");
 }
 
 /** Short form for a 200x100 encoder segment or a key subtitle. */
 export function formatGitCompact(status: GitStatus): string {
-	const branch = status.branch ?? (status.detached ? "detached" : "--");
-	return `${branch} M:${status.modified}`;
+	return `${branchLabel(status)} M:${status.modified}`;
 }

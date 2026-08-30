@@ -15,9 +15,13 @@ import type {
 } from "@elgato/streamdeck";
 import { renderGitKey } from "../presentation/renderers/key-renderer.js";
 import { buildGitViewModel } from "../presentation/view-models/git.js";
+import type { UiConcern } from "../presentation/ui-coordinator.js";
 import type { AgentDeckRuntime } from "../runtime.js";
 import { ActionSubscriptions } from "./action-subscriptions.js";
+import { bindRenderer } from "./renderer-binding.js";
 import type { GitActionSettings } from "./settings.js";
+
+const CONCERNS: readonly UiConcern[] = ["git"];
 
 @action({ UUID: "com.agentdeck.streamdeck-plus.git" })
 export class GitAction extends SingletonAction<GitActionSettings> {
@@ -30,10 +34,9 @@ export class GitAction extends SingletonAction<GitActionSettings> {
 	}
 
 	public override onWillAppear(ev: WillAppearEvent<GitActionSettings>): void {
-		if (!ev.action.isKey()) {
-			return;
+		if (ev.action.isKey()) {
+			this.#bind(ev.action, ev.payload.settings);
 		}
-		this.#attach(ev.action, ev.payload.settings);
 	}
 
 	public override onWillDisappear(ev: WillDisappearEvent<GitActionSettings>): void {
@@ -41,12 +44,9 @@ export class GitAction extends SingletonAction<GitActionSettings> {
 	}
 
 	public override onDidReceiveSettings(ev: DidReceiveSettingsEvent<GitActionSettings>): void {
-		if (!ev.action.isKey()) {
-			return;
+		if (ev.action.isKey()) {
+			this.#bind(ev.action, ev.payload.settings);
 		}
-		// The watched path may have changed, so rebuild the subscription set.
-		this.#subscriptions.release(ev.action.id);
-		this.#attach(ev.action, ev.payload.settings);
 	}
 
 	public override async onKeyDown(ev: KeyDownEvent<GitActionSettings>): Promise<void> {
@@ -61,15 +61,19 @@ export class GitAction extends SingletonAction<GitActionSettings> {
 		}
 	}
 
-	#attach(target: KeyAction<GitActionSettings>, settings: GitActionSettings): void {
-		const redraw = (): void => void this.#render(target, settings);
-		this.#subscriptions.add(target.id, this.#runtime.ui.subscribe("git", redraw));
-
-		const path = settings.repositoryPath;
-		if (path !== undefined && path.length > 0) {
-			this.#subscriptions.add(target.id, this.#runtime.git.watch(path));
-		}
-		redraw();
+	#bind(target: KeyAction<GitActionSettings>, settings: GitActionSettings): void {
+		bindRenderer({
+			subscriptions: this.#subscriptions,
+			ui: this.#runtime.ui,
+			target,
+			settings,
+			concerns: CONCERNS,
+			render: (key, current) => this.#render(key, current),
+			watch: (current) => {
+				const path = current.repositoryPath;
+				return path === undefined || path.length === 0 ? [] : [this.#runtime.git.watch(path)];
+			},
+		});
 	}
 
 	async #render(target: KeyAction<GitActionSettings>, settings: GitActionSettings): Promise<void> {

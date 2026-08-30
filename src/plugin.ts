@@ -16,7 +16,12 @@ import { createLogger, type LogLevel as AgentDeckLogLevel, type LogSink } from "
 import { CodexProvider } from "./providers/codex/codex-provider.js";
 import { createRuntime } from "./runtime.js";
 
-/** Global settings — design §23.1. Credentials are never among them (§22.1). */
+/**
+ * Global settings — design §23.1. Credentials are never among them (§22.1).
+ *
+ * Intervals are lower-bounded by the services that consume them; a Property
+ * Inspector `min` attribute is not enforced when JavaScript reads `value`.
+ */
 interface AgentDeckGlobalSettings {
 	codexExecutable?: string;
 	codexHealthCheckIntervalMs?: number;
@@ -50,6 +55,10 @@ async function applyGlobalSettings(settings: AgentDeckGlobalSettings): Promise<v
 	const level: AgentDeckLogLevel = settings.debugLogging === true ? "debug" : "info";
 	logger.setLevel(level);
 	streamDeck.logger.setLevel(level);
+
+	runtime.git.setPollInterval(
+		typeof settings.gitPollIntervalMs === "number" ? settings.gitPollIntervalMs : undefined,
+	);
 
 	const provider = runtime.registry.get(runtime.defaultProviderId);
 	if (provider instanceof CodexProvider) {

@@ -12,17 +12,20 @@
  * serde `rename_all = "camelCase"`) and `codex-rs/app-server/README.md`.
  */
 
-/** Methods this plugin calls (design §9.3 — stable API surface only). */
+/**
+ * Methods this plugin actually calls (design §9.3 — stable API surface only).
+ *
+ * Deliberately not a catalogue of the whole protocol: `account/usage/read` and
+ * `turn/steer` belong to later milestones and are added when their callers land.
+ */
 export const CodexMethod = {
 	Initialize: "initialize",
 	Initialized: "initialized",
 	AccountRead: "account/read",
 	AccountRateLimitsRead: "account/rateLimits/read",
-	AccountUsageRead: "account/usage/read",
 	ThreadList: "thread/list",
 	ThreadRead: "thread/read",
 	TurnInterrupt: "turn/interrupt",
-	TurnSteer: "turn/steer",
 	ModelList: "model/list",
 } as const;
 

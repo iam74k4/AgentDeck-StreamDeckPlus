@@ -240,15 +240,16 @@ export class JsonRpcTransport {
 	}
 }
 
+/**
+ * Classifies a JSON-RPC error by its numeric code only.
+ *
+ * Instructions §10: no branch may key off the server's message text. Whether the
+ * account is signed in is answered by `account/read` in `CodexProvider`, not by
+ * pattern-matching an error string that the server is free to reword or localise.
+ */
 export function jsonRpcErrorToAgentDeckError(error: JsonRpcErrorBody, method: string): AgentDeckError {
 	if (error.code === CODEX_SERVER_OVERLOADED) {
 		return new AgentDeckError("RATE_LIMITED", `${method}: ${error.message}`, { retryable: true });
-	}
-	if (error.code === JSON_RPC_METHOD_NOT_FOUND) {
-		return new AgentDeckError("PROTOCOL_ERROR", `${method}: ${error.message}`);
-	}
-	if (/not\s*(logged\s*in|authenticated)|unauthor/i.test(error.message)) {
-		return new AgentDeckError("NOT_AUTHENTICATED", `${method}: ${error.message}`);
 	}
 	return new AgentDeckError("PROTOCOL_ERROR", `${method}: ${error.message}`);
 }

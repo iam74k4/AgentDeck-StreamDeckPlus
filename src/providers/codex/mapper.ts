@@ -7,6 +7,7 @@
 import type { AgentSession, AgentSessionState } from "../../domain/session.js";
 import type { UsageWindow } from "../../domain/usage.js";
 import type {
+	WireAccount,
 	WireAccountRateLimitsUpdated,
 	WireGetAccountRateLimitsResponse,
 	WireModel,
@@ -96,6 +97,12 @@ export function mergeRateLimitSnapshot(
 /**
  * Applies a full `account/rateLimits/read` result.
  *
+ * `rateLimits` is documented upstream as the "backward-compatible single-bucket
+ * view": it mirrors one of the entries in `rateLimitsByLimitId` rather than
+ * describing a bucket of its own. Merging both would show the same quota twice,
+ * so the keyed map wins whenever it has entries and the unkeyed view is used
+ * only when that map is absent or empty.
+ *
  * Buckets absent from a full read are dropped — the account no longer has them —
  * but each surviving bucket is still merged field-wise so descriptive fields the
  * read omits (e.g. `limitName`) are not lost.
@@ -106,30 +113,33 @@ export function applyFullRateLimits(
 ): CodexRateLimitState {
 	const next = new Map<string, WireRateLimitSnapshot>();
 
-	const primaryBucket = response.rateLimits;
-	if (primaryBucket !== null && primaryBucket !== undefined) {
-		const key = bucketKey(primaryBucket);
-		next.set(key, mergeRateLimitSnapshot(state.buckets.get(key), primaryBucket));
-	}
+	const byId = Object.entries(response.rateLimitsByLimitId ?? {}).filter(
+		(entry): entry is [string, WireRateLimitSnapshot] => entry[1] !== null && entry[1] !== undefined,
+	);
 
-	const byId = response.rateLimitsByLimitId;
-	if (byId !== null && byId !== undefined) {
-		for (const [id, snapshot] of Object.entries(byId)) {
-			if (snapshot === null || snapshot === undefined) {
-				continue;
-			}
+	if (byId.length > 0) {
+		for (const [id, snapshot] of byId) {
 			const key = typeof snapshot.limitId === "string" && snapshot.limitId.length > 0 ? snapshot.limitId : id;
-			next.set(
-				key,
-				mergeRateLimitSnapshot(next.get(key) ?? state.buckets.get(key), { ...snapshot, limitId: key }),
-			);
+			next.set(key, mergeRateLimitSnapshot(state.buckets.get(key), { ...snapshot, limitId: key }));
 		}
+		return { buckets: next };
 	}
 
+	const single = response.rateLimits;
+	if (single !== null && single !== undefined) {
+		const key = bucketKey(single);
+		next.set(key, mergeRateLimitSnapshot(state.buckets.get(key), single));
+	}
 	return { buckets: next };
 }
 
-/** Applies a sparse `account/rateLimits/updated` notification. */
+/**
+ * Applies a sparse `account/rateLimits/updated` notification.
+ *
+ * An update carrying no `limitId` is that same single-bucket view, so when
+ * exactly one bucket is known it updates that bucket instead of inventing a
+ * second one beside it.
+ */
 export function applyRateLimitsUpdate(
 	state: CodexRateLimitState,
 	update: WireAccountRateLimitsUpdated,
@@ -138,10 +148,18 @@ export function applyRateLimitsUpdate(
 	if (snapshot === null || snapshot === undefined) {
 		return state;
 	}
-	const key = bucketKey(snapshot);
+	const key = resolveUpdateBucket(state, snapshot);
 	const buckets = new Map(state.buckets);
 	buckets.set(key, mergeRateLimitSnapshot(state.buckets.get(key), snapshot));
 	return { buckets };
+}
+
+function resolveUpdateBucket(state: CodexRateLimitState, snapshot: WireRateLimitSnapshot): string {
+	if (typeof snapshot.limitId === "string" && snapshot.limitId.length > 0) {
+		return snapshot.limitId;
+	}
+	const known = [...state.buckets.keys()];
+	return known.length === 1 ? (known[0] ?? DEFAULT_LIMIT_BUCKET) : DEFAULT_LIMIT_BUCKET;
 }
 
 /**
@@ -298,6 +316,17 @@ export function wireThreadToSession(
 		session.label = preview;
 	}
 	return session;
+}
+
+/**
+ * Decides whether Codex is signed in, from the shape of `account/read`.
+ *
+ * `Account` is an internally tagged union (`apiKey` / `chatgpt` / `amazonBedrock`),
+ * so the presence of a tag is the signal. Instructions §10: this is what replaces
+ * matching "not logged in" against an error message.
+ */
+export function isAuthenticatedAccount(account: WireAccount | null | undefined): boolean {
+	return typeof account?.type === "string" && account.type.length > 0;
 }
 
 export function wireModelToDescriptor(model: WireModel): ModelDescriptor {

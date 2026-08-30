@@ -17,9 +17,13 @@ import type {
 import type { WindowSelection } from "../domain/usage.js";
 import { renderUsageKey } from "../presentation/renderers/key-renderer.js";
 import { buildUsageViewModel } from "../presentation/view-models/usage.js";
+import type { UiConcern } from "../presentation/ui-coordinator.js";
 import type { AgentDeckRuntime } from "../runtime.js";
 import { ActionSubscriptions } from "./action-subscriptions.js";
+import { bindRenderer } from "./renderer-binding.js";
 import type { UsageActionSettings } from "./settings.js";
+
+const CONCERNS: readonly UiConcern[] = ["usage", "provider"];
 
 @action({ UUID: "com.agentdeck.streamdeck-plus.usage" })
 export class UsageAction extends SingletonAction<UsageActionSettings> {
@@ -32,18 +36,9 @@ export class UsageAction extends SingletonAction<UsageActionSettings> {
 	}
 
 	public override onWillAppear(ev: WillAppearEvent<UsageActionSettings>): void {
-		if (!ev.action.isKey()) {
-			return;
+		if (ev.action.isKey()) {
+			this.#bind(ev.action, ev.payload.settings);
 		}
-		const target = ev.action;
-		const redraw = (): void => void this.#render(target, ev.payload.settings);
-
-		this.#subscriptions.add(
-			ev.action.id,
-			this.#runtime.ui.subscribe("usage", redraw),
-			this.#runtime.ui.subscribe("provider", redraw),
-		);
-		redraw();
 	}
 
 	public override onWillDisappear(ev: WillDisappearEvent<UsageActionSettings>): void {
@@ -52,8 +47,19 @@ export class UsageAction extends SingletonAction<UsageActionSettings> {
 
 	public override onDidReceiveSettings(ev: DidReceiveSettingsEvent<UsageActionSettings>): void {
 		if (ev.action.isKey()) {
-			void this.#render(ev.action, ev.payload.settings);
+			this.#bind(ev.action, ev.payload.settings);
 		}
+	}
+
+	#bind(target: KeyAction<UsageActionSettings>, settings: UsageActionSettings): void {
+		bindRenderer({
+			subscriptions: this.#subscriptions,
+			ui: this.#runtime.ui,
+			target,
+			settings,
+			concerns: CONCERNS,
+			render: (key, current) => this.#render(key, current),
+		});
 	}
 
 	public override async onKeyDown(ev: KeyDownEvent<UsageActionSettings>): Promise<void> {

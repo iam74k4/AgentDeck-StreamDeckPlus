@@ -62,10 +62,23 @@ export function isColumn(value: number): value is Column {
 export class PlusDashboardCoordinator {
 	readonly #devices = new Map<DeviceId, Map<Column, EncoderContext>>();
 	readonly #onError: ((error: unknown) => void) | undefined;
+	readonly #onOccupancyChange: ((occupied: boolean) => void) | undefined;
 	#data: DashboardData | undefined;
+	#occupied = false;
 
-	public constructor(options: { onError?: (error: unknown) => void } = {}) {
+	public constructor(
+		options: {
+			onError?: (error: unknown) => void;
+			/** Fires on the 0↔1 encoder transitions, so callers can idle when empty. */
+			onOccupancyChange?: (occupied: boolean) => void;
+		} = {},
+	) {
 		this.#onError = options.onError;
+		this.#onOccupancyChange = options.onOccupancyChange;
+	}
+
+	public get occupied(): boolean {
+		return this.#occupied;
 	}
 
 	/** `willAppear` — claims a column on a device. */
@@ -76,6 +89,7 @@ export class PlusDashboardCoordinator {
 			this.#devices.set(deviceId, columns);
 		}
 		columns.set(column, context);
+		this.#syncOccupancy();
 		if (this.#data !== undefined) {
 			this.#renderDevice(deviceId, columns, this.#data);
 		}
@@ -95,6 +109,16 @@ export class PlusDashboardCoordinator {
 		if (columns.size === 0) {
 			this.#devices.delete(deviceId);
 		}
+		this.#syncOccupancy();
+	}
+
+	#syncOccupancy(): void {
+		const occupied = this.#devices.size > 0;
+		if (occupied === this.#occupied) {
+			return;
+		}
+		this.#occupied = occupied;
+		this.#onOccupancyChange?.(occupied);
 	}
 
 	public mode(deviceId: DeviceId): DashboardMode {

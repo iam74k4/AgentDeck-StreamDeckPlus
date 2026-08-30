@@ -19,7 +19,11 @@ import { Backoff } from "../../infrastructure/backoff.js";
 import { resolveExecutable } from "../../infrastructure/executable.js";
 import type { Logger } from "../../infrastructure/logger.js";
 import { createLogger, nullSink } from "../../infrastructure/logger.js";
-import { spawnManagedProcess, type ManagedProcess } from "../../infrastructure/process-manager.js";
+import {
+	spawnManagedProcess,
+	type ManagedProcess,
+	type ProcessExit,
+} from "../../infrastructure/process-manager.js";
 import { scheduleInterval, type ScheduledTask } from "../../infrastructure/scheduler.js";
 import type { AgentProvider, ProviderLifecycleState } from "../provider.js";
 import { AppServerClient } from "./app-server-client.js";
@@ -28,6 +32,7 @@ import {
 	applyFullRateLimits,
 	applyRateLimitsUpdate,
 	createRateLimitState,
+	isAuthenticatedAccount,
 	isRateLimitReached,
 	threadStatusToSessionState,
 	toUsageWindows,
@@ -45,6 +50,38 @@ import {
 } from "./protocol.js";
 
 export const CODEX_PROVIDER_ID = "codex";
+
+/** Resolves the child's exit once it is known, or `undefined` within `timeoutMs`. */
+async function settledExit(child: ManagedProcess, timeoutMs: number): Promise<ProcessExit | undefined> {
+	let timer: NodeJS.Timeout | undefined;
+	const timeout = new Promise<undefined>((resolve) => {
+		timer = setTimeout(() => resolve(undefined), timeoutMs);
+		timer.unref?.();
+	});
+	try {
+		return await Promise.race([child.exited, timeout]);
+	} finally {
+		if (timer !== undefined) {
+			clearTimeout(timer);
+		}
+	}
+}
+
+/**
+ * Floor for the background health check (design §17.4, §21.3).
+ *
+ * A Property Inspector number field hands back whatever was typed — `min` is not
+ * enforced when JavaScript reads `value` — so the floor is applied here, where
+ * the polling actually happens.
+ */
+export const MIN_HEALTH_CHECK_INTERVAL_MS = 15_000;
+
+function clampHealthCheckInterval(value: number | undefined): number {
+	if (typeof value !== "number" || !Number.isFinite(value)) {
+		return 120_000;
+	}
+	return Math.max(MIN_HEALTH_CHECK_INTERVAL_MS, value);
+}
 
 export interface CodexProviderOptions {
 	/** Overridable per design §17.4 ("Executable override"). */
@@ -95,7 +132,7 @@ export class CodexProvider implements AgentProvider {
 	#lastError: AgentDeckError | undefined;
 	#healthCheck: ScheduledTask | undefined;
 	#restartTimer: NodeJS.Timeout | undefined;
-	#startPromise: Promise<void> | undefined;
+	#queue: Promise<unknown> = Promise.resolve();
 	#stopping = false;
 
 	public constructor(options: CodexProviderOptions = {}) {
@@ -171,17 +208,38 @@ export class CodexProvider implements AgentProvider {
 		return this.#resolve(this.#executable(), { env: this.#options.env }) !== undefined;
 	}
 
+	/**
+	 * Start and stop are serialised through one queue.
+	 *
+	 * Without it, a `stop()` awaiting `process.shutdown()` can overlap a `start()`
+	 * — trivially reachable from two Property Inspector settings changes — and the
+	 * finishing stop then clears the state of the connection the start just made,
+	 * leaking the child process and silently disabling the health check.
+	 */
 	public start(): Promise<void> {
+		// Set synchronously so a restart timer that fires between now and the queued
+		// run sees the current intent rather than the previous one.
 		this.#stopping = false;
-		this.#startPromise ??= this.#startOnce().finally(() => {
-			this.#startPromise = undefined;
-		});
-		return this.#startPromise;
+		return this.#enqueue(() => this.#startOnce());
 	}
 
-	public async stop(): Promise<void> {
+	public stop(): Promise<void> {
 		this.#stopping = true;
 		this.#clearRestartTimer();
+		return this.#enqueue(() => this.#stopOnce());
+	}
+
+	#enqueue<T>(task: () => Promise<T>): Promise<T> {
+		const result = this.#queue.then(task, task);
+		// The queue itself must never reject, or every later operation is skipped.
+		this.#queue = result.then(
+			() => undefined,
+			() => undefined,
+		);
+		return result;
+	}
+
+	async #stopOnce(): Promise<void> {
 		this.#healthCheck?.stop();
 		this.#healthCheck = undefined;
 
@@ -265,7 +323,7 @@ export class CodexProvider implements AgentProvider {
 	}
 
 	async #startOnce(): Promise<void> {
-		if (this.#state === "ready" || this.#state === "initializing" || this.#state === "starting") {
+		if (this.#stopping || this.#state === "ready" || this.#state === "initializing") {
 			return;
 		}
 
@@ -295,7 +353,13 @@ export class CodexProvider implements AgentProvider {
 			this.#startHealthCheck();
 			this.#emitHealth();
 		} catch (error) {
-			this.#recordError(error);
+			// A failed spawn and the stdin/stdout teardown it causes race each other,
+			// and the teardown surfaces as a generic PROVIDER_OFFLINE. Give the child
+			// a moment to report why it never started, so "the configured executable
+			// cannot be run" shows CLI? rather than a retry loop against OFFLINE.
+			const exit = connection === undefined ? undefined : await settledExit(connection.process, 500);
+			this.#recordError(exit?.error ?? error);
+
 			if (connection !== undefined) {
 				connection.unsubscribe();
 				connection.transport.close(this.#lastError);
@@ -303,6 +367,11 @@ export class CodexProvider implements AgentProvider {
 			}
 			this.#connection = undefined;
 			this.#emitHealth();
+
+			if (this.#lastError?.code === "CLI_NOT_FOUND") {
+				this.#setState("stopped");
+				return;
+			}
 			this.#scheduleRestart();
 		}
 	}
@@ -361,15 +430,21 @@ export class CodexProvider implements AgentProvider {
 			if (this.#connection?.process !== child) {
 				return;
 			}
-			this.#logger.warn("app-server exited", exit);
+			this.#logger.warn("app-server exited", { code: exit.code, signal: exit.signal });
+			const failure = exit.error ?? new AgentDeckError("PROVIDER_OFFLINE", "App server exited.");
 			this.#connection = undefined;
-			transport.close(new AgentDeckError("PROVIDER_OFFLINE", "App server exited."));
+			transport.close(failure);
 			this.#healthCheck?.stop();
 			this.#healthCheck = undefined;
 			this.#markSessionsDisconnected();
 			if (!this.#stopping) {
-				this.#recordError(new AgentDeckError("PROVIDER_OFFLINE", "App server exited."));
+				this.#recordError(failure);
 				this.#emitHealth();
+				// A binary that cannot be executed will not fix itself on a timer.
+				if (failure.code === "CLI_NOT_FOUND") {
+					this.#setState("stopped");
+					return;
+				}
 				this.#scheduleRestart();
 			}
 		});
@@ -384,14 +459,22 @@ export class CodexProvider implements AgentProvider {
 
 	/** Initial reads once READY. Failures here degrade the snapshot, not the process. */
 	async #primeState(connection: Connection): Promise<void> {
-		try {
-			const response = await connection.client.readRateLimits();
-			this.#rateLimits = applyFullRateLimits(this.#rateLimits, response);
-			this.#lastSuccessAt = new Date();
-		} catch (error) {
-			this.#recordError(error);
+		const authenticated = await this.#checkAuthentication(connection);
+
+		if (authenticated) {
+			try {
+				const response = await connection.client.readRateLimits();
+				this.#rateLimits = applyFullRateLimits(this.#rateLimits, response);
+				this.#lastSuccessAt = new Date();
+			} catch (error) {
+				this.#recordError(error);
+			}
 		}
 		this.#emit({ type: "usage-updated", snapshot: this.#usageSnapshot() });
+
+		if (!authenticated) {
+			return;
+		}
 
 		try {
 			await this.listSessions();
@@ -400,9 +483,35 @@ export class CodexProvider implements AgentProvider {
 		}
 	}
 
+	/**
+	 * Establishes sign-in state from `account/read` rather than from error text.
+	 *
+	 * A transport-level failure (offline, timeout) is left alone — that is a
+	 * connection problem, not a credential problem. An application-level refusal,
+	 * or a reply with no account in it, means the user needs to sign in, which is
+	 * what the deck's LOGIN badge tells them (design §17.3).
+	 */
+	async #checkAuthentication(connection: Connection): Promise<boolean> {
+		try {
+			if (isAuthenticatedAccount(await connection.client.readAccount())) {
+				return true;
+			}
+			this.#recordError(new AgentDeckError("NOT_AUTHENTICATED", "Codex reported no signed-in account."));
+			return false;
+		} catch (error) {
+			const failure = toAgentDeckError(error);
+			if (failure.code === "PROTOCOL_ERROR") {
+				this.#recordError(new AgentDeckError("NOT_AUTHENTICATED", "Codex refused to describe the account."));
+				return false;
+			}
+			this.#recordError(failure);
+			return false;
+		}
+	}
+
 	#startHealthCheck(): void {
 		this.#healthCheck?.stop();
-		const interval = this.#options.healthCheckIntervalMs ?? 120_000;
+		const interval = clampHealthCheckInterval(this.#options.healthCheckIntervalMs);
 		this.#healthCheck = scheduleInterval(
 			interval,
 			async () => {

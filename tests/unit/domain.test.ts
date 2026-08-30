@@ -110,6 +110,7 @@ describe("git formatting (design §16.1)", () => {
 		repositoryPath: "/repo",
 		branch: "main",
 		detached: false,
+		hasCommits: true,
 		modified: 4,
 		staged: 2,
 		untracked: 1,
@@ -125,6 +126,12 @@ describe("git formatting (design §16.1)", () => {
 
 	it("labels a detached head", () => {
 		expect(formatGitSummary({ ...status, branch: undefined, detached: true })).toContain("detached");
+	});
+
+	it("omits ahead/behind before the first commit", () => {
+		const summary = formatGitSummary({ ...status, hasCommits: false, ahead: 0, behind: 0 });
+		expect(summary).not.toContain("↑");
+		expect(summary).toContain("main");
 	});
 });
 

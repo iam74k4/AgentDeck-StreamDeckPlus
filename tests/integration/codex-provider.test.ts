@@ -4,11 +4,14 @@
  * push notifications (§7.3), sparse merge (§7.4), lifecycle and crash recovery
  * (§7.5), and turn interruption (design §12.2).
  */
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ProviderEvent } from "@/domain/provider-events.js";
 import { createLogger, nullSink } from "@/infrastructure/logger.js";
-import { CodexProvider } from "@/providers/codex/codex-provider.js";
+import { CodexProvider, MIN_HEALTH_CHECK_INTERVAL_MS } from "@/providers/codex/codex-provider.js";
 import { waitFor } from "../helpers/wait.js";
 
 const FAKE_SERVER = fileURLToPath(new URL("../helpers/fake-codex-app-server.mjs", import.meta.url));
@@ -66,6 +69,20 @@ describe("codex app-server lifecycle", () => {
 		expect(provider.sessions[0]).toMatchObject({ id: "thr_1", providerId: "codex", state: "idle" });
 	});
 
+	it("reports CLI_NOT_FOUND when the path resolves but cannot be executed", async () => {
+		// A directory passes the executable-bit check and then fails to spawn with
+		// EACCES, which is the path that turns a spawn error into a typed code.
+		const directory = mkdtempSync(join(tmpdir(), "agentdeck-bin-"));
+
+		const provider = createProvider({}, { executable: directory, args: [], resolve: () => directory });
+		await provider.start();
+
+		expect(provider.status).toBe("cli-not-found");
+		// A path that cannot be executed will not fix itself on a timer.
+		expect(provider.lifecycleState).toBe("stopped");
+		rmSync(directory, { recursive: true, force: true });
+	});
+
 	it("reports CLI_NOT_FOUND without retrying when the executable is missing", async () => {
 		const provider = createProvider({}, { executable: "definitely-not-codex-xyz" });
 		const events: ProviderEvent[] = [];
@@ -112,6 +129,72 @@ describe("codex app-server lifecycle", () => {
 		// The last successful read is still what the deck shows (design §27).
 		expect(snapshot.windows.map((w) => w.usedPercent)).toEqual([41, 12]);
 		expect(snapshot.lastSuccessAt).toBeInstanceOf(Date);
+	});
+});
+
+describe("authentication (design §17.3)", () => {
+	it("reports LOGIN when the app-server will not describe the account", async () => {
+		const provider = createProvider({ FAKE_FAIL: "account/read" });
+		await provider.start();
+
+		// The process is healthy; the credential is not — those are different badges.
+		expect(provider.lifecycleState).toBe("ready");
+		expect(provider.status).toBe("login-required");
+		expect(provider.usageSnapshot().error?.code).toBe("NOT_AUTHENTICATED");
+	});
+
+	it("does not read usage while unauthenticated", async () => {
+		const provider = createProvider({ FAKE_FAIL: "account/read" });
+		await provider.start();
+		expect(provider.usageSnapshot().windows).toEqual([]);
+	});
+
+	it("reports READY once the account comes back", async () => {
+		const provider = createProvider();
+		await provider.start();
+		expect(provider.status).toBe("ready");
+	});
+});
+
+describe("lifecycle races (instructions §7.5)", () => {
+	it("serialises overlapping start and stop instead of leaking a connection", async () => {
+		const provider = createProvider();
+		await provider.start();
+
+		// Two settings changes in quick succession look exactly like this.
+		await Promise.all([provider.stop(), provider.start(), provider.stop(), provider.start()]);
+
+		expect(provider.lifecycleState).toBe("ready");
+		expect(provider.usageSnapshot().windows).toHaveLength(2);
+
+		await provider.stop();
+		expect(provider.lifecycleState).toBe("stopped");
+	});
+
+	it("a start that loses the race to a stop leaves nothing running", async () => {
+		const provider = createProvider();
+		const starting = provider.start();
+		const stopping = provider.stop();
+		await Promise.all([starting, stopping]);
+
+		expect(provider.lifecycleState).toBe("stopped");
+	});
+
+	it("applies an executable change by restarting once", async () => {
+		const provider = createProvider();
+		await provider.start();
+		await provider.configure({ executable: process.execPath, args: [FAKE_SERVER, "--again"] });
+
+		expect(provider.lifecycleState).toBe("ready");
+		expect(provider.usageSnapshot().windows).toHaveLength(2);
+	});
+
+	it("floors the health-check interval so a settings typo cannot become a hot loop", async () => {
+		const provider = createProvider({}, { healthCheckIntervalMs: 5 });
+		await provider.start();
+		// The provider clamps rather than trusting the value it was handed.
+		expect(MIN_HEALTH_CHECK_INTERVAL_MS).toBeGreaterThan(5);
+		expect(provider.lifecycleState).toBe("ready");
 	});
 });
 

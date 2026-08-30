@@ -207,7 +207,7 @@ npm run verify
   ├─ prettier --check   OK
   ├─ eslint             OK (0 errors)
   ├─ tsc --noEmit       OK
-  ├─ vitest run         10 files / 160 tests passed
+  ├─ vitest run         12 files / 203 tests passed
   └─ rollup -c          OK
 
 npx @elgato/cli validate com.agentdeck.streamdeck-plus.sdPlugin
@@ -249,7 +249,104 @@ Spike acceptance テストを書いた際に、単体テストでは見えなか
 
 ---
 
-## 5. 次段階（v0.1 Control Core）で残っている作業
+## 5. コードレビューと是正
+
+Spike完了後にブランチ全体（110ファイル / 約14.4k行）を10観点でレビューし、
+**15件の指摘をすべて修正した**。160テストが全緑の状態で出た指摘であり、
+テストがサービス層とマッパーに寄りすぎて **Action層（SDK境界）が素通し**
+だったことが原因である。修正と併せてAction層のテストを新設した。
+
+15件は独立した15個ではなく、4つのパターンに集約された。
+
+### パターン1 — クロージャが古い settings を掴む（3件）
+
+`willAppear` で `ev.payload.settings` をキャプチャし、`onDidReceiveSettings` で
+購読を張り直していなかった。SDKはイベントごとにpayloadを作り直す
+(`ActionEvent` が `this.payload = source.payload`) ため、Property Inspectorで
+変更した設定が次の背景再描画で元に戻っていた。Agent Statusは `tick` 購読が
+あるため1秒で戻る。`GitAction` だけが正しい形だった。
+
+**是正**: `src/actions/renderer-binding.ts` を新設し、全Actionが同一の
+bind経路（release → 購読 → 初回描画）を通るようにした。再発の原因は
+「実装が分岐していたこと」なので、共有化そのものが修正である。
+
+### パターン2 — Encoder回転が機能していない（2件）
+
+`#cycleUsageWindow` が次のWindowを計算して破棄していた。Segment切替も、
+プラグイン側 `setSettings` が `didReceiveSettings` を返さない
+(SDK `dist/plugin/actions/action.js:88` で確認) ため `preferredSegment` が
+更新されなかった。manifestで `Rotate: "Change view"` と宣伝しているのに
+両方とも無効だった。
+
+**是正**: `DashboardEncoderSettings` に `windowMode` / `windowId` を追加し、
+`UiCoordinator.dashboardData` が `WindowSelection` を受け取るようにした。
+回転は `auto → 各Window → auto` を巡回する（設計書 §7.5 により、消えた
+Pinned Windowは自動差替えせず `--` を出すため、autoへ戻る導線が要る）。
+回転時はローカルにも即座に再registerして描画する。
+
+### パターン3 — 文字列マッチによるエラー分岐（2件、指示書§10違反）
+
+git の stderr と Codex のエラーメッセージを正規表現で判定していた。
+Windows版gitはNLS同梱のため、日本語環境では `NO GIT` ではなく `ERROR` が出る。
+
+**是正**:
+
+- Git: 失敗時に `rev-parse --is-inside-work-tree` の**終了ステータス**で判定。
+  併せて `LC_ALL=C` を固定した。
+- Codex: `json-rpc.ts` から認証判定を削除。代わりに `account/read` の
+  **戻り値の形**（内部タグ付きunionのタグの有無）で判定する。
+  これにより未使用だった `AppServerClient.readAccount` が実際に使われるようになった。
+
+### パターン4 — 設定・寿命管理の穴（4件）
+
+Property Inspectorがキーストロークごとに `setGlobalSettings` を送り、
+1打鍵ごとにapp-serverが再起動していた。さらに `#startOnce` のガードに
+`"stopping"` が無いため start/stop が競合し、**子プロセスをリークしたうえ
+health checkが恒久停止**する経路があった。
+
+**是正**:
+
+- PI: テキスト入力を400msデバウンス（select/checkboxは即時）。
+  編集中のフィールドは外部更新で上書きしない。
+- Provider: start/stopを単一キューで直列化。`#stopping` は同期的に立て、
+  再起動タイマーが最新の意図を見るようにした。
+- Health check間隔に下限15秒、git polling間隔に下限5秒を設けた
+  （PIの `min` はJSが `value` を読む際に強制されない）。
+- `gitPollIntervalMs` を実際に配線し、`GitService.setPollInterval` を追加した。
+
+### 単体の指摘
+
+| 指摘                                                                        | 是正                                                                      |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `rateLimits` と `rateLimitsByLimitId` で同じ枠を2重にバケット化             | keyed mapがある場合はそちらを正とする。実測で4窓→2窓を確認                |
+| `session-removed` が provider を跨いでIDの一致するSessionを削除             | provider修飾したキーで削除するよう修正                                    |
+| Runtime が `tick` を常時購読し、Idleガードを無効化                          | Encoder occupancy（0↔1遷移）に応じて購読/解除するよう変更                 |
+| `branch.oid (initial)` が実質デッドコードで、`detached` のdocと実装が不一致 | `hasCommits` を追加。`detached` は detached HEAD のみを意味するよう明確化 |
+| `spawnErrorToAgentDeckError` が未使用で、documentした契約が未実装           | `ProcessExit.error` として実際に配線。ENOEXECもCLI_NOT_FOUNDへ            |
+| `CodexMethod.AccountUsageRead` / `TurnSteer` が未使用                       | 削除（呼び出し側が来る段階で追加する）                                    |
+
+### テスト
+
+160 → **203件**。追加の中心は今まで存在しなかったAction層である。
+
+| 追加                                | 内容                                                                                        |
+| ----------------------------------- | ------------------------------------------------------------------------------------------- |
+| `tests/unit/actions.test.ts`        | 設定変更が**次の**背景再描画を跨いで保持されること、Encoder回転、STOPの有効/無効            |
+| `tests/unit/ui-coordinator.test.ts` | 概念別の通知ルーティング、1Hzタイマーの起動条件                                             |
+| `tests/helpers/fake-runtime.ts`     | 実サービスで組んだRuntime（モックではなく実配線を検証する）                                 |
+| 既存ファイルへ追加                  | バケット重複、認証、start/stop競合、spawn失敗、間隔下限、poll間隔、occupancy、localized git |
+
+新テストが元の不具合を実際に捕捉することは、修正を一時的に戻して
+失敗することを確認済み。
+
+なお、Vitest（Vite 7 / oxc）はTC39標準デコレータを降格しないため、
+Action層のテストが読み込めなかった。`vitest.config.ts` に、デコレータを
+含むファイルだけを `tsc`（製品ビルドと同じコンパイラ）で変換する
+小さなプラグインを追加して解決した。
+
+---
+
+## 6. 次段階（v0.1 Control Core）で残っている作業
 
 指示書 §4 に対する残タスク。指示書 §2.2 に従い、本Spikeでは着手していない。
 

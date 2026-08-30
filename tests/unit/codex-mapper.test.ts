@@ -106,6 +106,39 @@ describe("rate limit merging (design §9.4)", () => {
 		expect(windows[1]?.label).toBe("Review 1d");
 	});
 
+	it("does not double-count the backward-compatible single-bucket view", () => {
+		// `rateLimits` mirrors an entry of `rateLimitsByLimitId`; counting both
+		// showed the same quota twice on the deck.
+		const bucket = {
+			limitName: "Codex",
+			primary: { usedPercent: 41, windowDurationMins: 300 },
+			secondary: { usedPercent: 12, windowDurationMins: 10_080 },
+		};
+		const state = applyFullRateLimits(createRateLimitState(), {
+			rateLimits: { ...bucket, limitId: null },
+			rateLimitsByLimitId: { codex: { ...bucket, limitId: "codex" } },
+		});
+
+		const windows = toUsageWindows(state);
+		expect(windows.map((w) => w.id)).toEqual(["codex.primary", "codex.secondary"]);
+		// A single bucket means the label is not qualified with the limit name.
+		expect(windows.map((w) => w.label)).toEqual(["5h", "7d"]);
+	});
+
+	it("routes an unkeyed sparse update onto the single known bucket", () => {
+		let state = applyFullRateLimits(createRateLimitState(), {
+			rateLimits: { limitId: null },
+			rateLimitsByLimitId: {
+				codex: { limitId: "codex", primary: { usedPercent: 41, windowDurationMins: 300 } },
+			},
+		});
+		state = applyRateLimitsUpdate(state, { rateLimits: { primary: { usedPercent: 77 } } });
+
+		const windows = toUsageWindows(state);
+		expect(windows).toHaveLength(1);
+		expect(windows[0]).toMatchObject({ id: "codex.primary", usedPercent: 77, windowDurationMinutes: 300 });
+	});
+
 	it("reports when the account has hit a limit", () => {
 		const state = applyRateLimitsUpdate(createRateLimitState(), {
 			rateLimits: { primary: { usedPercent: 100 }, rateLimitReachedType: "rateLimitReached" },

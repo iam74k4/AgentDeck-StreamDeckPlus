@@ -159,10 +159,12 @@ describe("error classification", () => {
 		expect(error.retryable).toBe(true);
 	});
 
-	it("recognises an authentication failure", () => {
-		expect(jsonRpcErrorToAgentDeckError({ code: -32000, message: "not logged in" }, "a").code).toBe(
-			"NOT_AUTHENTICATED",
-		);
+	it("never classifies by the server's message text (instructions §10)", () => {
+		// Sign-in state is established from `account/read`, not from prose that the
+		// server is free to reword or localise.
+		for (const message of ["not logged in", "unauthorized", "認証されていません"]) {
+			expect(jsonRpcErrorToAgentDeckError({ code: -32000, message }, "a").code).toBe("PROTOCOL_ERROR");
+		}
 	});
 });
 

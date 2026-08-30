@@ -3,6 +3,11 @@
  *
  * Git is provider-independent core functionality: it never routes through an AI
  * provider. Reads only; AgentDeck does not mutate a repository.
+ *
+ * Failures are classified by exit status, never by matching git's stderr
+ * (instructions §10). Git for Windows ships full localisation, so message text is
+ * not something the plugin can branch on. The environment also pins `LC_ALL=C`
+ * so anything that does reach a log line is stable across machines.
  */
 
 import { execFile } from "node:child_process";
@@ -20,7 +25,7 @@ export interface GitCliAdapterOptions {
 	executable?: string;
 	logger?: Logger;
 	timeoutMs?: number;
-	/** Test seam matching the shape of `execFile`'s callback contract. */
+	/** Test seam. */
 	run?: GitRunner;
 }
 
@@ -59,7 +64,10 @@ export class GitCliAdapter implements GitAdapter {
 		);
 
 		if (result.code !== 0) {
-			throw gitFailureToError(result.stderr, path);
+			// One extra call, only on the failure path, to tell "not a repository"
+			// apart from a genuine git failure — using exit status, not text.
+			this.#logger?.debug(`git status exited with ${result.code}; classifying`);
+			throw gitFailureToError(path, await this.isRepository(path));
 		}
 		return parseGitStatusPorcelainV2(result.stdout, path);
 	}
@@ -72,7 +80,13 @@ export class GitCliAdapter implements GitAdapter {
 				execFile(
 					executable,
 					[...args],
-					{ timeout: options.timeoutMs, windowsHide: true, maxBuffer: 4 * 1024 * 1024 },
+					{
+						timeout: options.timeoutMs,
+						windowsHide: true,
+						maxBuffer: 4 * 1024 * 1024,
+						// Deterministic output regardless of the user's git locale.
+						env: { ...process.env, LC_ALL: "C", LANG: "C" },
+					},
 					(error, stdout, stderr) => {
 						if (error === null) {
 							resolve({ stdout, stderr, code: 0 });
@@ -92,9 +106,12 @@ export class GitCliAdapter implements GitAdapter {
 	}
 }
 
-export function gitFailureToError(stderr: string, path: string): AgentDeckError {
-	if (/not a git repository|does not exist|cannot change to/i.test(stderr)) {
-		return new AgentDeckError("GIT_NOT_REPOSITORY", `Not a git repository: ${path}`);
-	}
-	return new AgentDeckError("UNKNOWN", `git status failed for ${path}`);
+/**
+ * @param insideWorkTree Result of `git rev-parse --is-inside-work-tree` for the
+ * same path, which answers "is this a repository at all" by exit status.
+ */
+export function gitFailureToError(path: string, insideWorkTree: boolean): AgentDeckError {
+	return insideWorkTree
+		? new AgentDeckError("UNKNOWN", `git status failed for ${path}`)
+		: new AgentDeckError("GIT_NOT_REPOSITORY", `Not a git repository: ${path}`);
 }

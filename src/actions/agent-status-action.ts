@@ -16,9 +16,14 @@ import type {
 } from "@elgato/streamdeck";
 import { renderAgentStatusKey } from "../presentation/renderers/key-renderer.js";
 import { buildAgentStatusViewModel } from "../presentation/view-models/agent-status.js";
+import type { UiConcern } from "../presentation/ui-coordinator.js";
 import type { AgentDeckRuntime } from "../runtime.js";
 import { ActionSubscriptions } from "./action-subscriptions.js";
+import { bindRenderer } from "./renderer-binding.js";
 import type { AgentStatusActionSettings } from "./settings.js";
+
+/** `tick` keeps the elapsed-time readout moving while a turn runs. */
+const CONCERNS: readonly UiConcern[] = ["session", "provider", "usage", "tick"];
 
 @action({ UUID: "com.agentdeck.streamdeck-plus.agent-status" })
 export class AgentStatusAction extends SingletonAction<AgentStatusActionSettings> {
@@ -31,21 +36,9 @@ export class AgentStatusAction extends SingletonAction<AgentStatusActionSettings
 	}
 
 	public override onWillAppear(ev: WillAppearEvent<AgentStatusActionSettings>): void {
-		if (!ev.action.isKey()) {
-			return;
+		if (ev.action.isKey()) {
+			this.#bind(ev.action, ev.payload.settings);
 		}
-		const target = ev.action;
-		const redraw = (): void => void this.#render(target, ev.payload.settings);
-
-		this.#subscriptions.add(
-			ev.action.id,
-			this.#runtime.ui.subscribe("session", redraw),
-			this.#runtime.ui.subscribe("provider", redraw),
-			this.#runtime.ui.subscribe("usage", redraw),
-			// Keeps the elapsed-time readout moving while a turn runs.
-			this.#runtime.ui.subscribe("tick", redraw),
-		);
-		redraw();
 	}
 
 	public override onWillDisappear(ev: WillDisappearEvent<AgentStatusActionSettings>): void {
@@ -54,7 +47,7 @@ export class AgentStatusAction extends SingletonAction<AgentStatusActionSettings
 
 	public override onDidReceiveSettings(ev: DidReceiveSettingsEvent<AgentStatusActionSettings>): void {
 		if (ev.action.isKey()) {
-			void this.#render(ev.action, ev.payload.settings);
+			this.#bind(ev.action, ev.payload.settings);
 		}
 	}
 
@@ -67,6 +60,17 @@ export class AgentStatusAction extends SingletonAction<AgentStatusActionSettings
 			this.#runtime.logger.warn("failed to refresh sessions", error);
 			await ev.action.showAlert();
 		}
+	}
+
+	#bind(target: KeyAction<AgentStatusActionSettings>, settings: AgentStatusActionSettings): void {
+		bindRenderer({
+			subscriptions: this.#subscriptions,
+			ui: this.#runtime.ui,
+			target,
+			settings,
+			concerns: CONCERNS,
+			render: (key, current) => this.#render(key, current),
+		});
 	}
 
 	async #render(

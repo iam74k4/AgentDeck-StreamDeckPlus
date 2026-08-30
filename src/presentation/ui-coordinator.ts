@@ -12,7 +12,7 @@ import type { ProviderRegistry } from "../application/provider-registry.js";
 import type { SessionService } from "../application/session-service.js";
 import type { UsageService } from "../application/usage-service.js";
 import type { Unsubscribe } from "../domain/provider-events.js";
-import type { ProviderId, UsageSnapshot } from "../domain/usage.js";
+import type { ProviderId, UsageSnapshot, WindowSelection } from "../domain/usage.js";
 import type { Logger } from "../infrastructure/logger.js";
 import { scheduleInterval, type ScheduledTask } from "../infrastructure/scheduler.js";
 import type { DashboardData } from "./plus-dashboard-coordinator.js";
@@ -109,7 +109,12 @@ export class UiCoordinator {
 	}
 
 	/** Builds the four segment view models for the touch strip. */
-	public dashboardData(options: { providerId: ProviderId; repositoryPath?: string }): DashboardData {
+	public dashboardData(options: {
+		providerId: ProviderId;
+		repositoryPath?: string;
+		/** Design §7.5 — a dial that pinned a window must keep showing that window. */
+		windowSelection?: WindowSelection;
+	}): DashboardData {
 		const provider = this.#registry.get(options.providerId);
 		const providerLabel = provider?.displayName ?? options.providerId;
 		const snapshot = this.#usage.getSnapshot(options.providerId);
@@ -120,7 +125,7 @@ export class UiCoordinator {
 			usage: buildUsageViewModel({
 				providerLabel,
 				snapshot,
-				selection: { mode: "auto" },
+				selection: options.windowSelection ?? { mode: "auto" },
 				showResetAt: true,
 				now,
 			}),

@@ -15,6 +15,11 @@ import type { Logger } from "./logger.js";
 export interface ProcessExit {
 	code: number | null;
 	signal: NodeJS.Signals | null;
+	/**
+	 * Set when the child never started — a missing or non-executable binary — so
+	 * callers can report CLI_NOT_FOUND instead of a generic offline state.
+	 */
+	error?: AgentDeckError;
 }
 
 export interface SpawnOptions {
@@ -47,21 +52,26 @@ class NodeManagedProcess implements ManagedProcess {
 	#running = true;
 	#shutdownPromise: Promise<ProcessExit> | undefined;
 
-	public constructor(child: ChildProcessWithoutNullStreams, graceMs: number, logger?: Logger) {
+	public constructor(
+		child: ChildProcessWithoutNullStreams,
+		command: string,
+		graceMs: number,
+		logger?: Logger,
+	) {
 		this.#child = child;
 		this.#graceMs = graceMs;
 		this.#logger = logger;
 
 		this.#exited = new Promise<ProcessExit>((resolve) => {
-			const settle = (code: number | null, signal: NodeJS.Signals | null): void => {
+			const settle = (exit: ProcessExit): void => {
 				this.#running = false;
-				resolve({ code, signal });
+				resolve(exit);
 			};
-			child.once("exit", settle);
+			child.once("exit", (code, signal) => settle({ code, signal }));
 			// `error` fires instead of `exit` when the binary cannot be started at all.
 			child.once("error", (error) => {
 				this.#logger?.warn("child process error", error);
-				settle(null, null);
+				settle({ code: null, signal: null, error: spawnErrorToAgentDeckError(error, command) });
 			});
 		});
 
@@ -158,8 +168,9 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | type
 /**
  * Spawns a child process.
  *
- * A missing executable surfaces as `CLI_NOT_FOUND` on {@link ManagedProcess.exited}
- * consumers rather than as an unhandled `error` event.
+ * A missing or non-executable binary surfaces as `CLI_NOT_FOUND` on the
+ * {@link ProcessExit} handed to {@link ManagedProcess.exited}, rather than as an
+ * unhandled `error` event.
  */
 export function spawnManagedProcess(options: SpawnOptions): ManagedProcess {
 	const child = spawn(options.command, [...(options.args ?? [])], {
@@ -170,7 +181,7 @@ export function spawnManagedProcess(options: SpawnOptions): ManagedProcess {
 		shell: false,
 	}) as ChildProcessWithoutNullStreams;
 
-	return new NodeManagedProcess(child, options.shutdownGraceMs ?? 3_000, options.logger);
+	return new NodeManagedProcess(child, options.command, options.shutdownGraceMs ?? 3_000, options.logger);
 }
 
 /** Translates a Node spawn failure into the typed error surface (instructions §10). */
@@ -179,7 +190,7 @@ export function spawnErrorToAgentDeckError(error: unknown, command: string): Age
 	if (code === "ENOENT") {
 		return new AgentDeckError("CLI_NOT_FOUND", `Executable not found: ${command}`, { cause: error });
 	}
-	if (code === "EACCES" || code === "EPERM") {
+	if (code === "EACCES" || code === "EPERM" || code === "ENOEXEC") {
 		return new AgentDeckError("CLI_NOT_FOUND", `Executable not runnable: ${command}`, { cause: error });
 	}
 	return new AgentDeckError("PROVIDER_OFFLINE", `Failed to start ${command}`, { cause: error });

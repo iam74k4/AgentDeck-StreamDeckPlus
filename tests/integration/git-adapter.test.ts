@@ -6,7 +6,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { GitService } from "@/application/git-service.js";
+import { GitService, MIN_GIT_POLL_INTERVAL_MS } from "@/application/git-service.js";
 import { GitCliAdapter } from "@/adapters/git/git-adapter.js";
 
 const roots: string[] = [];
@@ -118,6 +118,41 @@ describe("git adapter", () => {
 		});
 	});
 
+	it("reports a repository with no commits yet", async () => {
+		const fresh = makeTempDir("agentdeck-fresh-");
+		git(fresh, "init", "--initial-branch=main", ".");
+
+		const status = await adapter.getStatus(fresh);
+		expect(status.hasCommits).toBe(false);
+		expect(status.branch).toBe("main");
+		expect(status.detached).toBe(false);
+	});
+
+	it("classifies a non-repository by exit status, not by git's message language", async () => {
+		// Force a localized git: the classification must be unaffected.
+		const localized = new GitCliAdapter({
+			run: async (args) => {
+				if (args.includes("rev-parse")) {
+					return { stdout: "", stderr: "致命的: Gitリポジトリではありません", code: 128 };
+				}
+				return { stdout: "", stderr: "致命的: Gitリポジトリではありません", code: 128 };
+			},
+		});
+		await expect(localized.getStatus("/anywhere")).rejects.toMatchObject({ code: "GIT_NOT_REPOSITORY" });
+	});
+
+	it("keeps a real failure inside a repository distinct from a missing repository", async () => {
+		const flaky = new GitCliAdapter({
+			run: async (args) => {
+				if (args.includes("rev-parse")) {
+					return { stdout: "true\n", stderr: "", code: 0 };
+				}
+				return { stdout: "", stderr: "fatal: index file corrupt", code: 128 };
+			},
+		});
+		await expect(flaky.getStatus("/repo")).rejects.toMatchObject({ code: "UNKNOWN" });
+	});
+
 	it("reports CLI_NOT_FOUND when git itself is missing", async () => {
 		const missing = new GitCliAdapter({ executable: "definitely-not-git-xyz" });
 		await expect(missing.getStatus(repo)).rejects.toMatchObject({ code: "CLI_NOT_FOUND" });
@@ -149,6 +184,7 @@ describe("git service (design §16.3)", () => {
 				return {
 					repositoryPath: path,
 					detached: false,
+					hasCommits: true,
 					modified: 0,
 					staged: 0,
 					untracked: 0,
@@ -161,6 +197,22 @@ describe("git service (design §16.3)", () => {
 
 		await Promise.all([service.refresh("/a"), service.refresh("/a"), service.refresh("/a")]);
 		expect(calls).toBe(1);
+		service.dispose();
+	});
+
+	it("applies a changed poll interval and floors an unusable one", () => {
+		const service = new GitService(new GitCliAdapter(), { pollIntervalMs: 60_000 });
+		expect(service.pollIntervalMs).toBe(60_000);
+
+		service.setPollInterval(30_000);
+		expect(service.pollIntervalMs).toBe(30_000);
+
+		// A Property Inspector `min` is not enforced when JS reads `value`.
+		service.setPollInterval(5);
+		expect(service.pollIntervalMs).toBe(MIN_GIT_POLL_INTERVAL_MS);
+
+		service.setPollInterval(undefined);
+		expect(service.pollIntervalMs).toBe(20_000);
 		service.dispose();
 	});
 
