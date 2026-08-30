@@ -52,6 +52,19 @@
 			</div>
 			<p class="hint">Milliseconds between background usage refreshes.</p>
 			<div class="row">
+				<label for="git-poll">Git poll</label>
+				<input
+					id="git-poll"
+					type="number"
+					min="5000"
+					step="5000"
+					placeholder="20000"
+					data-setting="gitPollIntervalMs"
+					data-scope="global"
+				/>
+			</div>
+			<p class="hint">Milliseconds between git status reads for watched repositories.</p>
+			<div class="row">
 				<label for="debug">Debug logging</label>
 				<input id="debug" type="checkbox" data-setting="debugLogging" data-scope="global" />
 			</div>
