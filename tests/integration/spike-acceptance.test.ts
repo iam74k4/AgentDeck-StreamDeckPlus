@@ -117,8 +117,13 @@ describe("technical spike acceptance", () => {
 		expect(encoders[2]?.last?.title.value).toBe("GIT");
 		expect(encoders[2]?.last?.detail.value).toContain("U:1");
 
-		expect(encoders[3]?.last?.title.value).toBe("CODEX");
-		expect(encoders[3]?.last?.value.value).toBe("READY");
+		// Column 3 is the AI Overview (design §18): the most constrained provider
+		// leads, and every other registered provider stays listed behind it.
+		expect(encoders[3]?.last?.title.value).toBe("CODEX 5h");
+		expect(encoders[3]?.last?.value.value).toBe("41%");
+		// Claude is registered but its bridge has never run, so it reads `--`
+		// rather than vanishing from the overview.
+		expect(encoders[3]?.last?.detail.value).toContain("Claude --");
 	});
 
 	it("renders the spike's key faces from live provider state", async () => {

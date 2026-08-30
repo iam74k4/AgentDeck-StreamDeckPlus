@@ -82,7 +82,18 @@ Git作業ツリーの絶対パスを設定する。
 - [ ] Stream Deckを抜き差ししてもPluginが落ちない
 - [ ] Stream Deckアプリを再起動してもPluginが復帰する
 
-### 3.5 Failure（設計書 §26 Failure Test）
+### 3.5 Claude bridge
+
+- [ ] Claude Code の `statusLine` に bridge を設定し、Usage キーの Provider を
+      Claude にすると % が表示される
+- [ ] 既存の status line がある場合、`--then` を付ければ元の表示が維持される
+- [ ] Claude Code を終了して放置すると、鮮度切れで `STALE` になり
+      直前の値が残る
+- [ ] bridge 未設定の状態では `LOGIN` と表示される
+- [ ] Touch Strip の AI Overview に Claude と Codex が並び、合算されない
+- [ ] Provider を Claude にした STOP キーは点灯しない（制御チャネルが無いため）
+
+### 3.6 Failure（設計書 §26 Failure Test）
 
 - [ ] Codex CLIが無い環境で `CLI?` と表示され、Pluginは動き続ける
 - [ ] Codex未ログイン時に `LOGIN` と表示される
@@ -92,7 +103,7 @@ Git作業ツリーの絶対パスを設定する。
 - [ ] Gitリポジトリでないパスを設定すると `NO GIT` と表示される
 - [ ] Active Sessionが無い状態でSTOPを押しても落ちず、アラート表示になる
 
-### 3.6 Security（指示書 §11）
+### 3.7 Security（指示書 §11）
 
 - [ ] `%appdata%\Elgato\StreamDeck\logs` のPluginログに
       OAuth Token / API Key / Authorization ヘッダが含まれない

@@ -8,6 +8,7 @@
  */
 
 import type { AgentSessionState } from "../domain/session.js";
+import type { ProviderOverviewEntry } from "../application/usage-service.js";
 import type { UsageSnapshot } from "../domain/usage.js";
 import {
 	escapeXml,
@@ -19,13 +20,13 @@ import {
 import {
 	renderAgentSegment,
 	renderGitSegment,
-	renderProviderSegment,
+	renderOverviewSegment,
 	renderUsageSegment,
 	type SegmentFeedback,
 } from "../presentation/renderers/encoder-renderer.js";
 import { buildAgentStatusViewModel } from "../presentation/view-models/agent-status.js";
 import { buildGitViewModel } from "../presentation/view-models/git.js";
-import { buildProviderViewModel } from "../presentation/view-models/provider.js";
+import { buildOverviewViewModel } from "../presentation/view-models/overview.js";
 import { buildUsageViewModel } from "../presentation/view-models/usage.js";
 import { Palette } from "../presentation/view-models/colors.js";
 
@@ -102,11 +103,40 @@ function snapshot(overrides: Partial<UsageSnapshot> = {}): UsageSnapshot {
 		fetchedAt: NOW,
 		windows: [
 			{ id: "codex.primary", label: "5h", usedPercent: 41, windowDurationMinutes: 300 },
-			{ id: "codex.secondary", label: "7d", usedPercent: 96, windowDurationMinutes: 10_080 },
+			{ id: "codex.secondary", label: "7d", usedPercent: 12, windowDurationMinutes: 10_080 },
 		],
 		...overrides,
 	};
 }
+
+function claudeSnapshot(overrides: Partial<UsageSnapshot> = {}): UsageSnapshot {
+	return {
+		providerId: "claude",
+		status: "ready",
+		fetchedAt: NOW,
+		windows: [
+			{ id: "claude.five_hour", label: "5h", usedPercent: 23.5, windowDurationMinutes: 300 },
+			{ id: "claude.seven_day", label: "7d", usedPercent: 96, windowDurationMinutes: 10_080 },
+		],
+		...overrides,
+	};
+}
+
+/** Design §18 — the two providers side by side, never summed. */
+const OVERVIEW: ProviderOverviewEntry[] = [
+	{
+		providerId: "claude",
+		displayName: "Claude",
+		status: "ready",
+		window: { id: "claude.seven_day", label: "7d", usedPercent: 96 },
+	},
+	{
+		providerId: "codex",
+		displayName: "Codex",
+		status: "ready",
+		window: { id: "codex.primary", label: "5h", usedPercent: 41 },
+	},
+];
 
 function session(state: AgentSessionState, startedMsAgo?: number) {
 	return {
@@ -196,13 +226,12 @@ export function renderDeckPreview(layout: SegmentLayout): string {
 				},
 			}),
 		),
-		// Row 2 — the same actions, configured differently.
+		// Row 2 — the same actions, pointed at a second provider and other windows.
 		agentKey({ providerLabel: "Codex", providerStatus: "ready", session: session("idle") }),
 		usageKey({
-			providerLabel: "Codex",
-			snapshot: snapshot(),
-			selection: { mode: "pinned", windowId: "codex.secondary" },
-			showResetAt: true,
+			providerLabel: "Claude",
+			snapshot: claudeSnapshot(),
+			selection: { mode: "pinned", windowId: "claude.seven_day" },
 		}),
 		renderGitKey(
 			gitEntry({
@@ -223,10 +252,9 @@ export function renderDeckPreview(layout: SegmentLayout): string {
 			}),
 		),
 		usageKey({
-			providerLabel: "Codex",
-			snapshot: snapshot(),
-			selection: { mode: "pinned", windowId: "codex.primary" },
-			displayMode: "remaining",
+			providerLabel: "Claude",
+			snapshot: claudeSnapshot(),
+			selection: { mode: "pinned", windowId: "claude.five_hour" },
 		}),
 	];
 
@@ -265,7 +293,7 @@ export function renderDeckPreview(layout: SegmentLayout): string {
 				},
 			}),
 		),
-		renderProviderSegment(buildProviderViewModel({ label: "Codex", status: "ready" })),
+		renderOverviewSegment(buildOverviewViewModel(OVERVIEW)),
 	];
 
 	const body = [
@@ -346,7 +374,7 @@ export function renderStatePreview(): string {
 		{
 			key: agentKey({ providerLabel: "Codex", providerStatus: "login-required" }),
 			caption: "LOGIN",
-			note: "account not signed in",
+			note: "sign in / bridge not set up",
 		},
 		{
 			key: usageKey({

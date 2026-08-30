@@ -16,17 +16,19 @@ import type { SegmentFeedback } from "./renderers/encoder-renderer.js";
 import {
 	renderAgentSegment,
 	renderGitSegment,
+	renderOverviewSegment,
 	renderProviderSegment,
 	renderUsageSegment,
 } from "./renderers/encoder-renderer.js";
 import type { AgentStatusViewModel } from "./view-models/agent-status.js";
 import type { GitViewModel } from "./view-models/git.js";
+import type { OverviewViewModel } from "./view-models/overview.js";
 import type { ProviderViewModel } from "./view-models/provider.js";
 import type { UsageViewModel } from "./view-models/usage.js";
 
 export type DeviceId = string;
 export type Column = 0 | 1 | 2 | 3;
-export const SEGMENT_KINDS = ["usage", "agent", "git", "provider"] as const;
+export const SEGMENT_KINDS = ["usage", "agent", "git", "overview", "provider"] as const;
 export type SegmentKind = (typeof SEGMENT_KINDS)[number];
 
 export type DashboardMode = "dashboard" | "standalone";
@@ -35,7 +37,9 @@ export const DASHBOARD_COLUMNS: Readonly<Record<Column, SegmentKind>> = {
 	0: "usage",
 	1: "agent",
 	2: "git",
-	3: "provider",
+	// With more than one provider registered, the side-by-side overview says more
+	// than a single provider's connection state (design §18).
+	3: "overview",
 };
 
 export const ENCODER_COLUMN_COUNT = 4;
@@ -52,6 +56,7 @@ export interface DashboardData {
 	usage: UsageViewModel;
 	agent: AgentStatusViewModel;
 	git: GitViewModel;
+	overview: OverviewViewModel;
 	provider: ProviderViewModel;
 }
 
@@ -176,6 +181,8 @@ export function renderSegment(kind: SegmentKind, data: DashboardData): SegmentFe
 			return renderAgentSegment(data.agent);
 		case "git":
 			return renderGitSegment(data.git);
+		case "overview":
+			return renderOverviewSegment(data.overview);
 		case "provider":
 			return renderProviderSegment(data.provider);
 	}

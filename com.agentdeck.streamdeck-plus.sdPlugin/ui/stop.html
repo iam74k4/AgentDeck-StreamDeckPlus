@@ -12,6 +12,7 @@
 			<select id="provider" data-setting="providerId">
 				<option value="">Default (Codex)</option>
 				<option value="codex">Codex</option>
+				<option value="claude">Claude</option>
 			</select>
 		</div>
 		<p class="hint">
@@ -43,6 +44,22 @@
 				/>
 			</div>
 			<p class="hint">Milliseconds between background usage refreshes.</p>
+			<div class="row">
+				<label for="claude-refresh">Claude refresh</label>
+				<input
+					id="claude-refresh"
+					type="number"
+					min="5000"
+					step="5000"
+					placeholder="30000"
+					data-setting="claudeRefreshIntervalMs"
+					data-scope="global"
+				/>
+			</div>
+			<p class="hint">
+				How often the Claude status-line bridge file is re-read. Claude Code pushes; see the README for the
+				one-line setup.
+			</p>
 			<div class="row">
 				<label for="git-poll">Git poll</label>
 				<input

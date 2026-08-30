@@ -8,24 +8,18 @@ const sdPlugin = "com.agentdeck.streamdeck-plus.sdPlugin";
 const isWatching = !!process.env.ROLLUP_WATCH;
 
 /**
- * Bundles the plugin into a single file that the Stream Deck host executes with Node.
- * @type {import('rollup').RollupOptions}
+ * Shared plugin list; both bundles compile the same sources the same way.
+ * @param {boolean} watchManifest
+ * @returns {import('rollup').Plugin[]}
  */
-export default {
-	input: "src/plugin.ts",
-	output: {
-		file: `${sdPlugin}/bin/plugin.js`,
-		format: "es",
-		sourcemap: isWatching,
-		sourcemapPathTransform: (relativeSourcePath, sourcemapPath) => {
-			return url.pathToFileURL(path.resolve(path.dirname(sourcemapPath), relativeSourcePath)).href;
-		},
-	},
-	plugins: [
+function plugins(watchManifest) {
+	return [
 		{
 			name: "watch-externals",
 			buildStart: function () {
-				this.addWatchFile(`${sdPlugin}/manifest.json`);
+				if (watchManifest) {
+					this.addWatchFile(`${sdPlugin}/manifest.json`);
+				}
 			},
 		},
 		typescript({
@@ -35,6 +29,38 @@ export default {
 		}),
 		nodeResolve({ browser: false, exportConditions: ["node"], preferBuiltins: true }),
 		commonjs(),
-	],
-	external: [],
-};
+	];
+}
+
+/**
+ * Two entry points:
+ *   `plugin.js`     the Stream Deck host executes this with Node.
+ *   `statusline.js` Claude Code executes this as its status-line command, which
+ *                   is how Claude usage reaches the plugin (design §10).
+ * @type {import('rollup').RollupOptions[]}
+ */
+export default [
+	{
+		input: "src/plugin.ts",
+		output: {
+			file: `${sdPlugin}/bin/plugin.js`,
+			format: "es",
+			sourcemap: isWatching,
+			sourcemapPathTransform: (relativeSourcePath, sourcemapPath) => {
+				return url.pathToFileURL(path.resolve(path.dirname(sourcemapPath), relativeSourcePath)).href;
+			},
+		},
+		plugins: plugins(true),
+		external: [],
+	},
+	{
+		input: "src/statusline.ts",
+		output: {
+			file: `${sdPlugin}/bin/statusline.js`,
+			format: "es",
+			sourcemap: isWatching,
+		},
+		plugins: plugins(false),
+		external: [],
+	},
+];

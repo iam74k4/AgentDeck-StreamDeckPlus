@@ -10,6 +10,7 @@
 
 import type { AgentStatusViewModel } from "../view-models/agent-status.js";
 import type { GitViewModel } from "../view-models/git.js";
+import type { OverviewViewModel } from "../view-models/overview.js";
 import type { ProviderViewModel } from "../view-models/provider.js";
 import type { UsageViewModel } from "../view-models/usage.js";
 import { Palette } from "../view-models/colors.js";
@@ -90,4 +91,16 @@ export function renderProviderSegment(vm: ProviderViewModel): SegmentFeedback {
 	);
 	feedback.value.color = vm.color;
 	return feedback;
+}
+
+/** Design §18 — the constrained provider leads, the rest follow. */
+export function renderOverviewSegment(vm: OverviewViewModel): SegmentFeedback {
+	return segment(
+		fit(vm.headline, 16),
+		vm.valueText,
+		fit(vm.detail, 26),
+		vm.color,
+		vm.barPercent,
+		vm.available,
+	);
 }

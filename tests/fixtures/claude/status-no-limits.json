@@ -1,0 +1,5 @@
+{
+	"session_id": "no-limits-session",
+	"model": { "id": "claude-opus-5", "display_name": "Opus" },
+	"cost": { "total_cost_usd": 0.5 }
+}

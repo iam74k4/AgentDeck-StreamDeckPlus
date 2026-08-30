@@ -16,6 +16,7 @@ import type { WindowSelection } from "./domain/usage.js";
 import type { Logger } from "./infrastructure/logger.js";
 import { PlusDashboardCoordinator } from "./presentation/plus-dashboard-coordinator.js";
 import { UiCoordinator } from "./presentation/ui-coordinator.js";
+import { ClaudeProvider, type ClaudeProviderOptions } from "./providers/claude/claude-provider.js";
 import {
 	CodexProvider,
 	CODEX_PROVIDER_ID,
@@ -53,6 +54,7 @@ export interface AgentDeckRuntime {
 export interface RuntimeOptions {
 	logger: Logger;
 	codex?: CodexProviderOptions;
+	claude?: ClaudeProviderOptions;
 	gitExecutable?: string;
 	gitPollIntervalMs?: number;
 }
@@ -62,6 +64,9 @@ export function createRuntime(options: RuntimeOptions): AgentDeckRuntime {
 
 	const registry = new ProviderRegistry(logger);
 	registry.register(new CodexProvider({ logger, ...options.codex }));
+	// Monitoring only: Claude Code reports usage but offers no control channel,
+	// so ClaudeProvider implements neither `interrupt` nor `steer` (design §10).
+	registry.register(new ClaudeProvider({ logger, ...options.claude }));
 
 	const usage = new UsageService(registry, { logger });
 	const sessions = new SessionService(registry, { logger });

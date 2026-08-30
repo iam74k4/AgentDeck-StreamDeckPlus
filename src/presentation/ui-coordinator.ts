@@ -18,6 +18,7 @@ import { scheduleInterval, type ScheduledTask } from "../infrastructure/schedule
 import type { DashboardData } from "./plus-dashboard-coordinator.js";
 import { buildAgentStatusViewModel } from "./view-models/agent-status.js";
 import { buildGitViewModel } from "./view-models/git.js";
+import { buildOverviewViewModel } from "./view-models/overview.js";
 import { buildProviderViewModel } from "./view-models/provider.js";
 import { buildUsageViewModel } from "./view-models/usage.js";
 
@@ -135,6 +136,7 @@ export class UiCoordinator {
 				session,
 				now,
 			}),
+			overview: buildOverviewViewModel(this.#usage.overview()),
 			git: buildGitViewModel(
 				options.repositoryPath === undefined ? undefined : this.#git.get(options.repositoryPath),
 			),

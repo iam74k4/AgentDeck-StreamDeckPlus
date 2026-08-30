@@ -350,6 +350,92 @@ Action層のテストが読み込めなかった。`vitest.config.ts` に、デ�
 
 ---
 
+## 6. Spike D — Claude（v0.2 Claude Usage Provider）
+
+設計書 §25 Spike D と §10 に基づき、Claude の取得口を調査して実装した。
+
+### 調査結果
+
+設計書 §10.1 は「Claude側は公開・安定した Usage API が保証されない可能性を前提に
+する」としていた。実際に Claude Code 2.1.251 を調べた結果は次のとおり。
+
+| 検証項目                | 結果                                                    |
+| ----------------------- | ------------------------------------------------------- |
+| Usage取得可否           | **可能**。ただし pull ではなく push のみ                |
+| ローカルUsageキャッシュ | **無し**。`~/.claude` 配下に該当ファイルは存在しない    |
+| CLIコマンド             | **無し**。`claude --help` に usage 系サブコマンドは無い |
+| Credential discovery    | **不要**。認証情報を一切読まずに取得できる              |
+| Parser fixture          | 用意済（`tests/fixtures/claude/*.json`）                |
+
+決め手は **status line 機構**である。Claude Code は
+`settings.json` の `statusLine.command` に設定されたコマンドへ、セッション情報を
+JSON で stdin に渡す。その中に次が含まれる。
+
+```json
+"rate_limits": {
+  "five_hour":   { "used_percentage": 23.5, "resets_at": 1738425600 },
+  "seven_day":   { "used_percentage": 41.2, "resets_at": 1738857600 },
+  "spend_limit": { "used_percentage": 62.8, "resets_at": 1740787200 }
+}
+```
+
+これは設計書 §7.3 の `UsageWindow`（usedPercent / resetsAt / windowDurationMinutes）
+へそのまま写像でき、5h / 7d という窓は設計書 §18 の例（`Claude 96% 7d`）とも一致する。
+インストール済みバイナリに当該フィールド名が存在することも確認済み。
+
+### 実装
+
+```text
+Claude Code
+   ↓ statusLine (JSON on stdin)
+bin/statusline.js   ← AgentDeckのbridge
+   ↓ atomic write
+%LOCALAPPDATA%\AgentDeck\claude-status.json
+   ↓
+ClaudeStatusFileSource → StatusLineUsageParser → UsageSnapshot
+```
+
+設計書 §10.1 の `Claude Raw Response → ClaudeUsageParser → UsageSnapshot` を
+そのまま満たす。§10.3 の Credential 要件（読み取り専用 / Plugin へコピーしない /
+更新は公式Clientへ任せる）は、**そもそも認証情報を触らない**ことで満たしている。
+
+bridge は既存の status line を奪わない。`--then "<元のコマンド>"` を付ければ
+元コマンドが同じ stdin を受け取り、その stdout がそのまま Claude Code に表示される。
+不正な入力・書き込み失敗・チェーン先の異常終了、いずれでも exit 0 を返す
+（デッキが止まることより、ユーザーの status line が壊れることの方が問題が大きい）。
+
+実機の bridge 動作は検証済み。ビルド済み `bin/statusline.js` に実 payload を
+流し、(1) ファイル書き出しとチェーン先出力の両立、(2) 単体使用時の無出力、
+(3) 壊れた stdin でも status line が生存、(4) チェーン先が exit 3 でも exit 0、
+の4点を確認した。
+
+### Claude は監視のみ
+
+Claude Code の status line は「どのセッションが開いているか」は報告するが、
+**「今ターンが走っているか」は報告しない**。また制御チャネルも存在しない。
+よって `ClaudeProvider` は `interrupt` / `steer` を実装せず、Session state は
+`idle` を報告する（推測しない）。設計書 §8.1 でこれらが任意メンバなのは
+まさにこのためであり、実装しないことが「押せないSTOPをデッキに出さない」
+（設計書 §12.2）を担保している。
+
+### AI Overview
+
+設計書 §18 に従い、Provider を横並びで表示し合算しない。最も逼迫した Provider が
+見出しになり、残りは後ろに列挙される。**データを報告していない Provider も
+一覧から消えない** —— `Claude --` という行が、bridge が未設定であることを
+ユーザーに伝える唯一の手がかりだからである。
+
+Touch Strip 第4列の既定を `PROVIDER` から `OVERVIEW` へ変更した（§3 設計差異3の
+暫定割り当ての解消）。`PROVIDER` は Segment 設定で引き続き選択できる。
+
+### 残課題
+
+- Claude Desktop deep link（設計書 §10.4）は未実装
+- `spend_limit` は Claude apps gateway 配下でのみ出現するため、実データでの確認は未
+- 実機での bridge 設定手順の確認（`docs/DEVICE_TEST.md`）
+
+---
+
 ## 6. 次段階（v0.1 Control Core）で残っている作業
 
 指示書 §4 に対する残タスク。指示書 §2.2 に従い、本Spikeでは着手していない。

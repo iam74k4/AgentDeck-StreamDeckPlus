@@ -13,6 +13,7 @@ import { StopAction } from "./actions/stop-action.js";
 import type { SettingsValue } from "./actions/settings.js";
 import { UsageAction } from "./actions/usage-action.js";
 import { createLogger, type LogLevel as AgentDeckLogLevel, type LogSink } from "./infrastructure/logger.js";
+import { ClaudeProvider } from "./providers/claude/claude-provider.js";
 import { CodexProvider } from "./providers/codex/codex-provider.js";
 import { createRuntime } from "./runtime.js";
 
@@ -25,6 +26,7 @@ import { createRuntime } from "./runtime.js";
 interface AgentDeckGlobalSettings {
 	codexExecutable?: string;
 	codexHealthCheckIntervalMs?: number;
+	claudeRefreshIntervalMs?: number;
 	gitPollIntervalMs?: number;
 	debugLogging?: boolean;
 	[key: string]: SettingsValue;
@@ -59,6 +61,15 @@ async function applyGlobalSettings(settings: AgentDeckGlobalSettings): Promise<v
 	runtime.git.setPollInterval(
 		typeof settings.gitPollIntervalMs === "number" ? settings.gitPollIntervalMs : undefined,
 	);
+
+	const claude = runtime.registry.get("claude");
+	if (claude instanceof ClaudeProvider) {
+		claude.configure({
+			...(typeof settings.claudeRefreshIntervalMs === "number"
+				? { refreshIntervalMs: settings.claudeRefreshIntervalMs }
+				: {}),
+		});
+	}
 
 	const provider = runtime.registry.get(runtime.defaultProviderId);
 	if (provider instanceof CodexProvider) {
