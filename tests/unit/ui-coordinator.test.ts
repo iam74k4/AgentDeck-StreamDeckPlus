@@ -4,12 +4,18 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GitService } from "@/application/git-service.js";
+import { ProjectService } from "@/application/project-service.js";
 import { ProviderRegistry } from "@/application/provider-registry.js";
 import { SessionService } from "@/application/session-service.js";
 import { UsageService } from "@/application/usage-service.js";
 import type { AgentSession } from "@/domain/session.js";
 import { UiCoordinator } from "@/presentation/ui-coordinator.js";
-import { ControllableProvider, gitStatus, usageSnapshot } from "../helpers/fake-runtime.js";
+import {
+	ControllableProvider,
+	gitStatus,
+	memoryProjectStore,
+	usageSnapshot,
+} from "../helpers/fake-runtime.js";
 
 function setup(): { ui: UiCoordinator; provider: ControllableProvider; dispose: () => void } {
 	const registry = new ProviderRegistry();
@@ -21,12 +27,14 @@ function setup(): { ui: UiCoordinator; provider: ControllableProvider; dispose: 
 		{ isRepository: async () => true, getStatus: async (path) => gitStatus({ repositoryPath: path }) },
 		{ pollIntervalMs: 600_000 },
 	);
-	const ui = new UiCoordinator({ registry, usage, sessions, git }, { tickIntervalMs: 1_000 });
+	const projects = new ProjectService({ store: memoryProjectStore() });
+	const ui = new UiCoordinator({ registry, usage, sessions, git, projects }, { tickIntervalMs: 1_000 });
 	return {
 		ui,
 		provider,
 		dispose: () => {
 			ui.dispose();
+			projects.dispose();
 			git.dispose();
 			sessions.dispose();
 			usage.dispose();

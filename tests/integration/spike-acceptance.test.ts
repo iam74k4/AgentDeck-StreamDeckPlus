@@ -32,6 +32,7 @@ import {
 import { buildAgentStatusViewModel } from "@/presentation/view-models/agent-status.js";
 import { buildUsageViewModel } from "@/presentation/view-models/usage.js";
 import { createRuntime, type AgentDeckRuntime } from "@/runtime.js";
+import { memoryProjectStore } from "../helpers/fake-runtime.js";
 import { waitFor } from "../helpers/wait.js";
 
 const FAKE_SERVER = fileURLToPath(new URL("../helpers/fake-codex-app-server.mjs", import.meta.url));
@@ -53,6 +54,7 @@ class FakeEncoder implements EncoderContext {
 function makeRuntime(env: NodeJS.ProcessEnv = {}): { runtime: AgentDeckRuntime; encoders: FakeEncoder[] } {
 	const created = createRuntime({
 		logger: createLogger({ sink: nullSink }),
+		projectStore: memoryProjectStore(),
 		// Without this, Claude would read the developer's own ~/.agentdeck.
 		claude: { statusDir: bridgeDir },
 		codex: {
@@ -106,6 +108,7 @@ describe("technical spike acceptance", () => {
 	it("shows Codex usage, agent status, git and provider health across the touch strip", async () => {
 		const { runtime: rt, encoders } = makeRuntime();
 		await rt.start();
+		await rt.projects.add({ path: repo, name: "agentdeck-demo" });
 		rt.git.watch(repo);
 
 		await waitFor(() => encoders[0]?.last?.value.value === "96%" || encoders[0]?.last?.value.value === "41%");
@@ -123,13 +126,35 @@ describe("technical spike acceptance", () => {
 		expect(encoders[2]?.last?.title.value).toBe("GIT");
 		expect(encoders[2]?.last?.detail.value).toContain("U:1");
 
-		// Column 3 is the AI Overview (design §18): the most constrained provider
-		// leads, and every other registered provider stays listed behind it.
-		expect(encoders[3]?.last?.title.value).toBe("CODEX 5h");
-		expect(encoders[3]?.last?.value.value).toBe("41%");
-		// Claude is registered but its bridge has never run, so it reads `--`
-		// rather than vanishing from the overview.
-		expect(encoders[3]?.last?.detail.value).toContain("Claude --");
+		// Column 3 is PROJECT (design §6.1, instructions §8.2). The AI Overview is
+		// still reachable, one Segment setting away.
+		expect(encoders[3]?.last?.title.value).toBe("PROJECT");
+		expect(encoders[3]?.last?.value.value).toBe("agentdeck-demo");
+	});
+
+	it("follows the active project for git, and switches between projects", async () => {
+		const { runtime: rt, encoders } = makeRuntime();
+		await rt.start();
+
+		const first = await rt.projects.add({ path: repo, name: "first" });
+		const second = await rt.projects.add({ path: bridgeDir, name: "second" });
+		await rt.projects.activate(first.id);
+
+		// The git segment watches whatever the active project points at — no
+		// per-action path setting involved.
+		await waitFor(() => encoders[2]?.last?.value.value === "main", {
+			message: "git segment never followed the active project",
+		});
+		expect(encoders[3]?.last?.value.value).toBe("first");
+
+		await rt.projects.activate(second.id);
+		rt.refreshDashboard();
+		expect(encoders[3]?.last?.value.value).toBe("second");
+		expect(rt.projects.getActive()?.id).toBe(second.id);
+
+		// Cycling wraps, which is what the project dial and key rely on.
+		await rt.projects.cycle(1);
+		expect(rt.projects.getActive()?.id).toBe(first.id);
 	});
 
 	it("renders the spike's key faces from live provider state", async () => {
@@ -193,6 +218,7 @@ describe("technical spike acceptance", () => {
 	it("keeps the deck readable when the Codex CLI is not installed", async () => {
 		const created = createRuntime({
 			logger: createLogger({ sink: nullSink }),
+			projectStore: memoryProjectStore(),
 			claude: { statusDir: bridgeDir },
 			codex: { executable: "definitely-not-codex-xyz", autoRestart: false },
 		});

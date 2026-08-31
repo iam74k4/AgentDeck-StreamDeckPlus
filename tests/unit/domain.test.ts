@@ -91,6 +91,9 @@ describe("project validation (instructions §4)", () => {
 		expect(validateProjectPath("C:\\src\\game").valid).toBe(true);
 		expect(validateProjectPath("/home/dev/game").valid).toBe(true);
 		expect(validateProjectPath("\\\\server\\share").valid).toBe(true);
+		// Windows calls this absolute, but it resolves against the current drive —
+		// not something a persisted setting should depend on.
+		expect(validateProjectPath("\\src\\game").code).toBe("not-absolute");
 	});
 
 	it("uses filesystem facts supplied by the adapter", () => {

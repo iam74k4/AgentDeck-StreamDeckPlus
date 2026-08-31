@@ -11,7 +11,7 @@ it right now.
 
 ![A Stream Deck + running AgentDeck: eight keys showing agent status, stop, usage and git, above a four-segment touch strip](docs/images/deck.svg)
 
-<sub>All eight keys are the same four action types with different settings, pointed at two providers. The last touch-strip segment is the AI Overview: providers side by side, never summed. Generated from the shipped renderers by <code>npm run preview</code>.</sub>
+<sub>Six action types across two providers. The strip's fourth segment follows the active project; the two below it are the alternatives you can set an encoder to, including the AI Overview — providers side by side, never summed. Generated from the shipped renderers by <code>npm run preview</code>.</sub>
 
 - **Design document (source of truth):** [`AGENTDECK_DESIGN.md`](./AGENTDECK_DESIGN.md)
 - **Implementation brief:** [`docs/AGENTDECK_CLAUDE_INSTRUCTIONS.md`](./docs/AGENTDECK_CLAUDE_INSTRUCTIONS.md)
@@ -19,7 +19,7 @@ it right now.
 
 ## Status
 
-Technical Spike complete; v0.1 Control Core in progress.
+Technical Spike and v0.1 Control Core complete. Claude usage (a v0.2 item) is in.
 
 | Spike             | Scope                                                           | State                |
 | ----------------- | --------------------------------------------------------------- | -------------------- |
@@ -77,6 +77,35 @@ npx @elgato/cli restart com.agentdeck.streamdeck-plus
 | Usage             | Key        | One rate-limit window, auto or pinned. Press refreshes.              |
 | Git Status        | Key        | Branch and working-tree counts. Press refreshes.                     |
 | Dashboard Segment | Encoder    | One touch-strip segment; four of them form a single dashboard.       |
+
+## Projects
+
+A Project binds a local directory to an AI working context. It is deliberately a
+separate thing from an agent session and from a provider — "which repository",
+"which session" and "which agent" are three different questions (design §3.4).
+
+Register one from the Project key's inspector, or press the key with an **Add
+path** configured. After that the key cycles through what you have registered,
+and switching moves everything that follows the project at once: the git key and
+segment re-point, and any launcher set to start "in project" follows too.
+
+Projects persist in Stream Deck's global settings, so they survive a restart and
+are visible from every inspector.
+
+Paths must name a drive (`C:\src\game`), a UNC share, or start at `/`. A
+drive-relative path like `\src\game` is rejected on purpose: Windows calls it
+absolute, but it resolves against whichever drive happens to be current, which is
+not something a stored setting should depend on.
+
+## Launching apps
+
+The App Launcher key starts VS Code, Windows Terminal, the Codex CLI, Claude
+Code, or any command you name — in the active project's directory by default.
+
+Everything is spawned with an argument array and no shell, so a project path
+containing a quote or an `&` is an argument and can never become a second
+command. A key whose app is not installed renders dimmed rather than failing on
+press.
 
 ## Providers
 

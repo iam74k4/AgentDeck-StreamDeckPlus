@@ -8,6 +8,7 @@
  */
 
 import type { GitService, GitStatusEntry } from "../application/git-service.js";
+import type { ProjectService } from "../application/project-service.js";
 import type { ProviderRegistry } from "../application/provider-registry.js";
 import type { SessionService } from "../application/session-service.js";
 import type { UsageService } from "../application/usage-service.js";
@@ -19,10 +20,11 @@ import type { DashboardData } from "./plus-dashboard-coordinator.js";
 import { buildAgentStatusViewModel } from "./view-models/agent-status.js";
 import { buildGitViewModel } from "./view-models/git.js";
 import { buildOverviewViewModel } from "./view-models/overview.js";
+import { buildProjectViewModel } from "./view-models/project.js";
 import { buildProviderViewModel } from "./view-models/provider.js";
 import { buildUsageViewModel } from "./view-models/usage.js";
 
-export type UiConcern = "usage" | "session" | "git" | "provider" | "tick";
+export type UiConcern = "usage" | "session" | "git" | "project" | "provider" | "tick";
 
 export type UiListener = () => void;
 
@@ -38,6 +40,7 @@ export class UiCoordinator {
 	readonly #usage: UsageService;
 	readonly #sessions: SessionService;
 	readonly #git: GitService;
+	readonly #projects: ProjectService;
 	readonly #logger: Logger | undefined;
 	readonly #listeners = new Map<UiConcern, Set<UiListener>>();
 	readonly #unsubscribes: Unsubscribe[] = [];
@@ -51,6 +54,7 @@ export class UiCoordinator {
 			usage: UsageService;
 			sessions: SessionService;
 			git: GitService;
+			projects: ProjectService;
 		},
 		options: UiCoordinatorOptions = {},
 	) {
@@ -58,6 +62,7 @@ export class UiCoordinator {
 		this.#usage = services.usage;
 		this.#sessions = services.sessions;
 		this.#git = services.git;
+		this.#projects = services.projects;
 		this.#logger = options.logger?.child("ui");
 		this.#tickIntervalMs = options.tickIntervalMs ?? 1_000;
 		this.#now = options.now ?? (() => new Date());
@@ -69,6 +74,7 @@ export class UiCoordinator {
 				this.#syncTick();
 			}),
 			this.#git.subscribe(() => this.invalidate("git")),
+			this.#projects.subscribe(() => this.invalidate("project")),
 			this.#registry.subscribe((event) => {
 				if (event.type === "provider-status") {
 					this.invalidate("provider");
@@ -121,6 +127,9 @@ export class UiCoordinator {
 		const snapshot = this.#usage.getSnapshot(options.providerId);
 		const session = this.#sessions.getActiveSession(options.providerId);
 		const now = this.#now();
+		const active = this.#projects.getActive();
+		// The active project is the repository unless an action names one explicitly.
+		const repositoryPath = options.repositoryPath ?? active?.path;
 
 		return {
 			usage: buildUsageViewModel({
@@ -138,9 +147,11 @@ export class UiCoordinator {
 				now,
 			}),
 			overview: buildOverviewViewModel(this.#usage.overview()),
-			git: buildGitViewModel(
-				options.repositoryPath === undefined ? undefined : this.#git.get(options.repositoryPath),
-			),
+			git: buildGitViewModel(repositoryPath === undefined ? undefined : this.#git.get(repositoryPath)),
+			project: buildProjectViewModel({
+				...(active === undefined ? {} : { active }),
+				total: this.#projects.list().length,
+			}),
 			provider: buildProviderViewModel({
 				label: providerLabel,
 				status: snapshot?.status ?? "loading",

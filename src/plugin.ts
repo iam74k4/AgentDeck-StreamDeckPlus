@@ -7,11 +7,15 @@
 
 import streamDeck from "@elgato/streamdeck";
 import { AgentStatusAction } from "./actions/agent-status-action.js";
+import { LauncherAction } from "./actions/launcher-action.js";
+import { ProjectAction } from "./actions/project-action.js";
 import { DashboardEncoderAction } from "./actions/dashboard-encoder-action.js";
 import { GitAction } from "./actions/git-action.js";
 import { StopAction } from "./actions/stop-action.js";
 import type { SettingsValue } from "./actions/settings.js";
 import { UsageAction } from "./actions/usage-action.js";
+import { stat } from "node:fs/promises";
+import type { ProjectState, ProjectStore } from "./application/project-service.js";
 import { createLogger, type LogLevel as AgentDeckLogLevel, type LogSink } from "./infrastructure/logger.js";
 import { ClaudeProvider } from "./providers/claude/claude-provider.js";
 import { CodexProvider } from "./providers/codex/codex-provider.js";
@@ -28,6 +32,9 @@ interface AgentDeckGlobalSettings {
 	codexHealthCheckIntervalMs?: number;
 	claudeRefreshIntervalMs?: number;
 	gitPollIntervalMs?: number;
+	/** Registered projects and the active one (design §7.1). */
+	projects?: SettingsValue;
+	activeProjectId?: string | null;
 	debugLogging?: boolean;
 	[key: string]: SettingsValue;
 }
@@ -41,13 +48,52 @@ const sink: LogSink = {
 };
 
 const logger = createLogger({ sink, level: "info", scope: "agentdeck" });
-const runtime = createRuntime({ logger });
+
+/**
+ * Projects live in Stream Deck's global settings, so they survive a plugin
+ * restart and are visible from every Property Inspector. The service never
+ * learns that: it is handed this store (design §8).
+ */
+const projectStore: ProjectStore = {
+	async load(): Promise<ProjectState> {
+		const settings = await streamDeck.settings.getGlobalSettings<AgentDeckGlobalSettings>();
+		return {
+			projects: Array.isArray(settings.projects)
+				? (settings.projects as unknown as ProjectState["projects"])
+				: [],
+			...(typeof settings.activeProjectId === "string" ? { activeProjectId: settings.activeProjectId } : {}),
+		};
+	},
+	async save(state: ProjectState): Promise<void> {
+		const settings = await streamDeck.settings.getGlobalSettings<AgentDeckGlobalSettings>();
+		await streamDeck.settings.setGlobalSettings({
+			...settings,
+			projects: state.projects as unknown as SettingsValue,
+			activeProjectId: state.activeProjectId ?? null,
+		});
+	},
+};
+
+const runtime = createRuntime({
+	logger,
+	projectStore,
+	projectStat: async (path) => {
+		try {
+			const info = await stat(path);
+			return { exists: true, isDirectory: info.isDirectory() };
+		} catch {
+			return { exists: false, isDirectory: false };
+		}
+	},
+});
 
 streamDeck.actions.registerAction(new AgentStatusAction(runtime));
 streamDeck.actions.registerAction(new StopAction(runtime));
 streamDeck.actions.registerAction(new UsageAction(runtime));
 streamDeck.actions.registerAction(new GitAction(runtime));
 streamDeck.actions.registerAction(new DashboardEncoderAction(runtime));
+streamDeck.actions.registerAction(new ProjectAction(runtime));
+streamDeck.actions.registerAction(new LauncherAction(runtime));
 
 streamDeck.settings.onDidReceiveGlobalSettings<AgentDeckGlobalSettings>((ev) => {
 	void applyGlobalSettings(ev.settings);

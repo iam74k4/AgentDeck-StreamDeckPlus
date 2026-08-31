@@ -193,6 +193,18 @@ const GLYPHS = {
 		canvas.circle(0.7, 0.4, 0.12, PALETTE.ok);
 		canvas.roundedRect(0.33, 0.44, 0.34, 0.08, 0.04, PALETTE.muted);
 	},
+	project(canvas) {
+		canvas.roundedRect(0.14, 0.26, 0.72, 0.52, 0.08, PALETTE.accent);
+		canvas.roundedRect(0.14, 0.18, 0.34, 0.14, 0.05, PALETTE.accent);
+		canvas.roundedRect(0.24, 0.44, 0.52, 0.08, 0.04, PALETTE.background);
+		canvas.roundedRect(0.24, 0.58, 0.34, 0.08, 0.04, PALETTE.background);
+	},
+	launcher(canvas) {
+		canvas.circle(0.5, 0.5, 0.36, PALETTE.surface);
+		canvas.roundedRect(0.46, 0.18, 0.08, 0.42, 0.04, PALETTE.ok);
+		canvas.roundedRect(0.32, 0.3, 0.08, 0.2, 0.04, PALETTE.ok);
+		canvas.roundedRect(0.6, 0.3, 0.08, 0.2, 0.04, PALETTE.ok);
+	},
 	dashboard(canvas) {
 		for (let i = 0; i < 4; i += 1) {
 			canvas.roundedRect(0.08 + i * 0.22, 0.34, 0.16, 0.32, 0.05, i === 1 ? PALETTE.ok : PALETTE.muted);
@@ -217,7 +229,7 @@ function write(relativePath, buffer) {
 	return target;
 }
 
-const ACTIONS = ["agent", "stop", "usage", "git", "dashboard"];
+const ACTIONS = ["agent", "stop", "usage", "git", "project", "launcher", "dashboard"];
 
 write("plugin/icon.png", render("plugin", 288, false));
 write("plugin/icon@2x.png", render("plugin", 576, false));

@@ -8,10 +8,12 @@
 
 import { GitService } from "./application/git-service.js";
 import type { Unsubscribe } from "./domain/provider-events.js";
+import { ProjectService, type PathStat, type ProjectStore } from "./application/project-service.js";
 import { ProviderRegistry } from "./application/provider-registry.js";
 import { SessionService } from "./application/session-service.js";
 import { UsageService } from "./application/usage-service.js";
 import { GitCliAdapter } from "./adapters/git/git-adapter.js";
+import { LauncherRegistry } from "./adapters/launcher/app-launcher.js";
 import type { WindowSelection } from "./domain/usage.js";
 import type { Logger } from "./infrastructure/logger.js";
 import { PlusDashboardCoordinator } from "./presentation/plus-dashboard-coordinator.js";
@@ -41,6 +43,8 @@ export interface AgentDeckRuntime {
 	readonly usage: UsageService;
 	readonly sessions: SessionService;
 	readonly git: GitService;
+	readonly projects: ProjectService;
+	readonly launchers: LauncherRegistry;
 	readonly ui: UiCoordinator;
 	readonly dashboard: PlusDashboardCoordinator;
 	readonly defaultProviderId: string;
@@ -53,6 +57,9 @@ export interface AgentDeckRuntime {
 
 export interface RuntimeOptions {
 	logger: Logger;
+	/** Where registered projects are persisted; injected so the layer stays clean. */
+	projectStore: ProjectStore;
+	projectStat?: PathStat;
 	codex?: CodexProviderOptions;
 	claude?: ClaudeProviderOptions;
 	gitExecutable?: string;
@@ -81,7 +88,14 @@ export function createRuntime(options: RuntimeOptions): AgentDeckRuntime {
 		},
 	);
 
-	const ui = new UiCoordinator({ registry, usage, sessions, git }, { logger });
+	const projects = new ProjectService({
+		store: options.projectStore,
+		logger,
+		...(options.projectStat === undefined ? {} : { stat: options.projectStat }),
+	});
+	const launchers = new LauncherRegistry({ logger });
+
+	const ui = new UiCoordinator({ registry, usage, sessions, git, projects }, { logger });
 
 	// The elapsed-time tick exists for the touch strip; with no encoder placed,
 	// nothing here should keep a 1 Hz timer alive (design §20.2).
@@ -134,7 +148,7 @@ export function createRuntime(options: RuntimeOptions): AgentDeckRuntime {
 
 	// Keep the touch strip in step with every concern the dashboard shows. `tick`
 	// is deliberately absent: it is subscribed only while an encoder is placed.
-	for (const concern of ["usage", "session", "git", "provider"] as const) {
+	for (const concern of ["usage", "session", "git", "project", "provider"] as const) {
 		ui.subscribe(concern, refreshDashboard);
 	}
 
@@ -144,6 +158,8 @@ export function createRuntime(options: RuntimeOptions): AgentDeckRuntime {
 		usage,
 		sessions,
 		git,
+		projects,
+		launchers,
 		ui,
 		dashboard,
 		defaultProviderId: CODEX_PROVIDER_ID,
@@ -153,6 +169,19 @@ export function createRuntime(options: RuntimeOptions): AgentDeckRuntime {
 		},
 		refreshDashboard,
 		async start(): Promise<void> {
+			await projects.load();
+			// The active project is the repository the git segment watches.
+			const activePath = projects.getActive()?.path;
+			if (activePath !== undefined) {
+				git.watch(activePath);
+			}
+			projects.subscribe((state) => {
+				const path = state.projects.find((project) => project.id === state.activeProjectId)?.path;
+				if (path !== undefined) {
+					git.watch(path);
+				}
+			});
+
 			const results = await registry.startAll();
 			for (const result of results) {
 				if (!result.started) {
@@ -164,6 +193,7 @@ export function createRuntime(options: RuntimeOptions): AgentDeckRuntime {
 			releaseTick?.();
 			releaseTick = undefined;
 			ui.dispose();
+			projects.dispose();
 			git.dispose();
 			sessions.dispose();
 			usage.dispose();

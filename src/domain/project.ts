@@ -45,7 +45,11 @@ export function validateProjectPath(
 		return { code: "empty-path", valid: false, message: "Project path is empty." };
 	}
 	if (!isAbsolutePath(path)) {
-		return { code: "not-absolute", valid: false, message: "Project path must be absolute." };
+		return {
+			code: "not-absolute",
+			valid: false,
+			message: "Project path must start with a drive letter, a UNC share, or /.",
+		};
 	}
 	if (stat !== undefined) {
 		if (!stat.exists) {
@@ -61,6 +65,10 @@ export function validateProjectPath(
 /**
  * Absolute-path test that is stable across the host OS, so the same rule can be
  * unit-tested on Linux CI while the MVP target is Windows (design §27).
+ *
+ * A drive-relative path such as `\\src\\game` is deliberately rejected even though
+ * Windows calls it absolute: it resolves against whichever drive happens to be
+ * current, which is not something a persisted project setting should depend on.
  */
 function isAbsolutePath(path: string): boolean {
 	return /^([a-zA-Z]:[\\/]|\\\\|\/)/.test(path);

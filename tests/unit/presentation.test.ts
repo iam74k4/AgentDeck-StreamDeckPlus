@@ -22,6 +22,7 @@ import { buildAgentStatusViewModel, formatElapsed } from "@/presentation/view-mo
 import { buildUsageViewModel, formatResetIn } from "@/presentation/view-models/usage.js";
 import { buildGitViewModel } from "@/presentation/view-models/git.js";
 import { buildOverviewViewModel } from "@/presentation/view-models/overview.js";
+import { buildProjectViewModel } from "@/presentation/view-models/project.js";
 import { buildProviderViewModel } from "@/presentation/view-models/provider.js";
 import { usageColor, Palette } from "@/presentation/view-models/colors.js";
 import type { UsageSnapshot } from "@/domain/usage.js";
@@ -221,6 +222,7 @@ describe("four-encoder coordination (design §6.2, instructions §8.3)", () => {
 		agent: buildAgentStatusViewModel({ providerLabel: "Codex", providerStatus: "ready" }),
 		git: buildGitViewModel(undefined),
 		overview: buildOverviewViewModel([]),
+		project: buildProjectViewModel({ total: 0 }),
 		provider: buildProviderViewModel({ label: "Codex", status: "ready" }),
 	};
 

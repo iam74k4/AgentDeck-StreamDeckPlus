@@ -4,10 +4,12 @@
  */
 
 import { GitService } from "@/application/git-service.js";
+import { ProjectService, type ProjectState, type ProjectStore } from "@/application/project-service.js";
 import { ProviderRegistry } from "@/application/provider-registry.js";
 import { SessionService } from "@/application/session-service.js";
 import { UsageService } from "@/application/usage-service.js";
 import type { GitAdapter } from "@/adapters/git/git-adapter.js";
+import { LauncherRegistry, type AppLauncher } from "@/adapters/launcher/app-launcher.js";
 import type { GitStatus } from "@/domain/git.js";
 import type { ProviderEvent, ProviderEventListener } from "@/domain/provider-events.js";
 import type { AgentSession } from "@/domain/session.js";
@@ -92,9 +94,23 @@ export interface FakeRuntime {
 	runtime: AgentDeckRuntime;
 	provider: ControllableProvider;
 	contexts: DashboardContext[];
+	launched: string[];
 }
 
-export function createFakeRuntime(options: { git?: GitAdapter } = {}): FakeRuntime {
+/** Keeps persisted project state in memory for tests. */
+export function memoryProjectStore(initial: ProjectState = { projects: [] }): ProjectStore {
+	let state = initial;
+	return {
+		load: async () => state,
+		save: async (next) => {
+			state = next;
+		},
+	};
+}
+
+export function createFakeRuntime(
+	options: { git?: GitAdapter; projectStore?: ProjectStore } = {},
+): FakeRuntime {
 	const logger = createLogger({ sink: nullSink });
 	const registry = new ProviderRegistry(logger);
 	const provider = new ControllableProvider();
@@ -110,7 +126,32 @@ export function createFakeRuntime(options: { git?: GitAdapter } = {}): FakeRunti
 		{ pollIntervalMs: 600_000 },
 	);
 
-	const ui = new UiCoordinator({ registry, usage, sessions, git });
+	const projects = new ProjectService({
+		store: options.projectStore ?? memoryProjectStore(),
+		// Tests assert on registration, not on the developer's filesystem.
+		stat: async () => ({ exists: true, isDirectory: true }),
+		idFactory: (() => {
+			let n = 0;
+			return () => `prj_${++n}`;
+		})(),
+	});
+
+	const launched: string[] = [];
+	const launchers = new LauncherRegistry({
+		create: (definition): AppLauncher => ({
+			id: definition.id,
+			displayName: definition.displayName,
+			isInstalled: async () => definition.command !== "missing",
+			launch: async (context) => {
+				if (definition.command === "missing") {
+					throw new Error("not installed");
+				}
+				launched.push(`${definition.id}:${context?.projectPath ?? ""}`);
+			},
+		}),
+	});
+
+	const ui = new UiCoordinator({ registry, usage, sessions, git, projects });
 	const contexts: DashboardContext[] = [];
 	let dashboardContext: DashboardContext = {};
 
@@ -135,6 +176,8 @@ export function createFakeRuntime(options: { git?: GitAdapter } = {}): FakeRunti
 		usage,
 		sessions,
 		git,
+		projects,
+		launchers,
 		ui,
 		dashboard,
 		defaultProviderId: "codex",
@@ -144,14 +187,17 @@ export function createFakeRuntime(options: { git?: GitAdapter } = {}): FakeRunti
 			refreshDashboard();
 		},
 		refreshDashboard,
-		async start(): Promise<void> {},
+		async start(): Promise<void> {
+			await projects.load();
+		},
 		async stop(): Promise<void> {
 			ui.dispose();
+			projects.dispose();
 			git.dispose();
 			sessions.dispose();
 			usage.dispose();
 		},
 	};
 
-	return { runtime, provider, contexts };
+	return { runtime, provider, contexts, launched };
 }

@@ -53,3 +53,20 @@ export interface DashboardEncoderSettings {
 	windowId?: string;
 	[key: string]: SettingsValue;
 }
+
+export interface ProjectActionSettings {
+	/** Empty follows the active project; set to pin this key to one project. */
+	projectId?: string;
+	/** Adds and activates this path the first time the key is pressed. */
+	addPath?: string;
+	[key: string]: SettingsValue;
+}
+
+export interface LauncherActionSettings {
+	appId?: string;
+	/** Used when `appId` names nothing built in. */
+	command?: string;
+	/** Launch in the active project's directory. Defaults to true. */
+	useActiveProject?: boolean;
+	[key: string]: SettingsValue;
+}

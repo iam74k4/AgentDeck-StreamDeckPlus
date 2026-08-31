@@ -2,36 +2,34 @@
 <html lang="en">
 	<head>
 		<meta charset="utf-8" />
-		<title>Dashboard Segment</title>
+		<title>App Launcher</title>
 		<link rel="stylesheet" href="lib/pi.css" />
 	</head>
 	<body>
-		<h1>Dashboard Segment</h1>
+		<h1>App Launcher</h1>
 		<div class="row">
-			<label for="segment">Segment</label>
-			<select id="segment" data-setting="segment">
-				<option value="">Auto (by dial position)</option>
-				<option value="usage">Usage</option>
-				<option value="agent">Agent</option>
-				<option value="git">Git</option>
-				<option value="project">Project</option>
-				<option value="overview">AI Overview</option>
-				<option value="provider">Provider</option>
+			<label for="app">App</label>
+			<select id="app" data-setting="appId">
+				<option value="">Custom command</option>
+				<option value="vscode">VS Code</option>
+				<option value="terminal">Windows Terminal</option>
+				<option value="codex">Codex CLI</option>
+				<option value="claude">Claude Code</option>
 			</select>
 		</div>
-		<p class="hint">With all four dials assigned, position decides the segment and this is ignored.</p>
-		<div class="row">
-			<label for="provider">Provider</label>
-			<select id="provider" data-setting="providerId">
-				<option value="">Default (Codex)</option>
-				<option value="codex">Codex</option>
-				<option value="claude">Claude</option>
-			</select>
+		<div class="row" data-when="appId=">
+			<label for="command">Command</label>
+			<input id="command" type="text" placeholder="my-tool" data-setting="command" />
 		</div>
+		<p class="hint" data-when="appId=">
+			Executable name on PATH, or an absolute path. Started without a shell, so arguments are never
+			re-interpreted.
+		</p>
 		<div class="row">
-			<label for="repo">Repository</label>
-			<input id="repo" type="text" placeholder="C:\\src\\my-project" data-setting="repositoryPath" />
+			<label for="use-project">In project</label>
+			<input id="use-project" type="checkbox" data-setting="useActiveProject" />
 		</div>
+		<p class="hint">Start in the active project directory. Leave off to start in the default location.</p>
 		<fieldset>
 			<legend>Plugin settings</legend>
 			<div class="row">

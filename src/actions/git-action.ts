@@ -1,8 +1,8 @@
 /**
  * Git key — design §16.
  *
- * The repository path comes from action settings during the spike. Once the
- * project service lands in v0.1 it becomes the active project's path.
+ * Follows the active project unless the key names a repository explicitly, so a
+ * project switch moves every git key at once.
  */
 
 import { action, SingletonAction } from "@elgato/streamdeck";
@@ -21,7 +21,7 @@ import { ActionSubscriptions } from "./action-subscriptions.js";
 import { bindRenderer } from "./renderer-binding.js";
 import type { GitActionSettings } from "./settings.js";
 
-const CONCERNS: readonly UiConcern[] = ["git"];
+const CONCERNS: readonly UiConcern[] = ["git", "project"];
 
 @action({ UUID: "com.agentdeck.streamdeck-plus.git" })
 export class GitAction extends SingletonAction<GitActionSettings> {
@@ -50,8 +50,8 @@ export class GitAction extends SingletonAction<GitActionSettings> {
 	}
 
 	public override async onKeyDown(ev: KeyDownEvent<GitActionSettings>): Promise<void> {
-		const path = ev.payload.settings.repositoryPath;
-		if (path === undefined || path.length === 0) {
+		const path = this.#repositoryPath(ev.payload.settings);
+		if (path === undefined) {
 			await ev.action.showAlert();
 			return;
 		}
@@ -59,6 +59,15 @@ export class GitAction extends SingletonAction<GitActionSettings> {
 		if (entry.status === undefined) {
 			await ev.action.showAlert();
 		}
+	}
+
+	/** Explicit setting wins; otherwise the active project is the repository. */
+	#repositoryPath(settings: GitActionSettings): string | undefined {
+		const configured = settings.repositoryPath?.trim();
+		if (configured !== undefined && configured.length > 0) {
+			return configured;
+		}
+		return this.#runtime.projects.getActive()?.path;
 	}
 
 	#bind(target: KeyAction<GitActionSettings>, settings: GitActionSettings): void {
@@ -70,15 +79,15 @@ export class GitAction extends SingletonAction<GitActionSettings> {
 			concerns: CONCERNS,
 			render: (key, current) => this.#render(key, current),
 			watch: (current) => {
-				const path = current.repositoryPath;
-				return path === undefined || path.length === 0 ? [] : [this.#runtime.git.watch(path)];
+				const path = this.#repositoryPath(current);
+				return path === undefined ? [] : [this.#runtime.git.watch(path)];
 			},
 		});
 	}
 
 	async #render(target: KeyAction<GitActionSettings>, settings: GitActionSettings): Promise<void> {
-		const path = settings.repositoryPath;
-		const entry = path === undefined || path.length === 0 ? undefined : this.#runtime.ui.getGitEntry(path);
+		const path = this.#repositoryPath(settings);
+		const entry = path === undefined ? undefined : this.#runtime.ui.getGitEntry(path);
 		await target.setImage(renderGitKey(buildGitViewModel(entry)));
 	}
 }

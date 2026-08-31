@@ -2,36 +2,24 @@
 <html lang="en">
 	<head>
 		<meta charset="utf-8" />
-		<title>Dashboard Segment</title>
+		<title>Project</title>
 		<link rel="stylesheet" href="lib/pi.css" />
 	</head>
 	<body>
-		<h1>Dashboard Segment</h1>
+		<h1>Project</h1>
 		<div class="row">
-			<label for="segment">Segment</label>
-			<select id="segment" data-setting="segment">
-				<option value="">Auto (by dial position)</option>
-				<option value="usage">Usage</option>
-				<option value="agent">Agent</option>
-				<option value="git">Git</option>
-				<option value="project">Project</option>
-				<option value="overview">AI Overview</option>
-				<option value="provider">Provider</option>
-			</select>
+			<label for="add-path">Add path</label>
+			<input id="add-path" type="text" placeholder="C:\src\my-project" data-setting="addPath" />
 		</div>
-		<p class="hint">With all four dials assigned, position decides the segment and this is ignored.</p>
+		<p class="hint">
+			Absolute path to register and activate on the first press. Leave empty and the key cycles through the
+			projects you have already registered.
+		</p>
 		<div class="row">
-			<label for="provider">Provider</label>
-			<select id="provider" data-setting="providerId">
-				<option value="">Default (Codex)</option>
-				<option value="codex">Codex</option>
-				<option value="claude">Claude</option>
-			</select>
+			<label for="project-id">Pin to</label>
+			<input id="project-id" type="text" placeholder="(active project)" data-setting="projectId" />
 		</div>
-		<div class="row">
-			<label for="repo">Repository</label>
-			<input id="repo" type="text" placeholder="C:\\src\\my-project" data-setting="repositoryPath" />
-		</div>
+		<p class="hint">Project id to activate on press instead of cycling.</p>
 		<fieldset>
 			<legend>Plugin settings</legend>
 			<div class="row">

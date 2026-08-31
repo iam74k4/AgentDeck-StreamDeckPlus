@@ -11,6 +11,7 @@
 import type { AgentStatusViewModel } from "../view-models/agent-status.js";
 import type { GitViewModel } from "../view-models/git.js";
 import type { OverviewViewModel } from "../view-models/overview.js";
+import type { ProjectViewModel } from "../view-models/project.js";
 import type { ProviderViewModel } from "../view-models/provider.js";
 import type { UsageViewModel } from "../view-models/usage.js";
 import { Palette } from "../view-models/colors.js";
@@ -103,4 +104,11 @@ export function renderOverviewSegment(vm: OverviewViewModel): SegmentFeedback {
 		vm.barPercent,
 		vm.available,
 	);
+}
+
+/** Design §6.1 — the active project and how many there are to switch between. */
+export function renderProjectSegment(vm: ProjectViewModel): SegmentFeedback {
+	const feedback = segment("PROJECT", fit(vm.name, 14), fit(vm.detail, 24), vm.color);
+	feedback.value.color = vm.available ? Palette.text : Palette.textMuted;
+	return feedback;
 }

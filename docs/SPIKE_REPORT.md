@@ -443,18 +443,30 @@ Touch Strip 第4列の既定を `PROVIDER` から `OVERVIEW` へ変更した（�
 
 ---
 
-## 7. 次段階で残っている作業
+## 7. v0.1 Control Core 完了
 
-指示書 §4 に対する残タスク。指示書 §2.2 に従い、本Spikeでは着手していない。
+指示書 §4 の v0.1 範囲を実装した。
 
-- [ ] Project登録 / 一覧 / Active Project / 切替 / path validation
-      （Domain `Project` と `validateProjectPath` は実装済・テスト済。
-      `application/project-service.ts` と Project Action が未実装）
-- [ ] Git ActionのリポジトリをActive Projectから解決する（現在はAction設定）
-- [ ] Touch Strip 第4列を `PROJECT` へ差し替え
-- [ ] App Launcher（VS Code / Windows Terminal / Codex CLI / 任意アプリ）
-- [ ] Property Inspector から Project を選択できるようにする
-- [ ] 実機Device Test（[`DEVICE_TEST.md`](./DEVICE_TEST.md)）
+| 項目                                                                | 実装                                                                                                                     |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Project登録 / 一覧 / Active / 切替 / path validation                | `application/project-service.ts`。永続化はStream Deck global settingsだが、Serviceは注入された`ProjectStore`しか知らない |
+| App Launcher（VS Code / Windows Terminal / Codex CLI / 任意アプリ） | `adapters/launcher/app-launcher.ts`                                                                                      |
+| Project Action / App Launcher Action                                | `actions/project-action.ts` / `actions/launcher-action.ts`                                                               |
+| Git のリポジトリを Active Project から解決                          | Git Actionは設定が空ならActive Projectを使う。Touch Strip も同様                                                         |
+| Touch Strip 第4列                                                   | `OVERVIEW` から `PROJECT` へ（設計書 §6.1 / 指示書 §8.2 のとおり）。OVERVIEWはSegment設定で選択可能                      |
 
-v0.2以降（Claude Usage / Push-to-Talk / Screenshot / Prompt Dial / Approval UI /
-Model Selector）はinterface境界のみ用意し、実装していない。
+### 設計判断
+
+**Launcher はシェルを介さない。** 引数配列 + `shell: false` で spawn するため、
+プロジェクトパスに `&` や引用符が含まれてもコマンドとして再解釈されない。
+未インストールのアプリはキーが減光表示になり、押しても失敗しない。
+
+**ドライブ相対パスを拒否する。** `\src\game` は Windows 的には絶対パスだが、
+その時点のカレントドライブに依存して解決される。永続化される設定が依存してよい
+性質ではないため、ドライブレター / UNC / `/` を要求する。
+
+### 残課題
+
+- **実機検証**（[`DEVICE_TEST.md`](./DEVICE_TEST.md)）— 唯一の未達
+- Claude Desktop deep link（設計書 §10.4）
+- v0.3 / v0.4（Voice / Screenshot / Approval / Model selector）は未着手

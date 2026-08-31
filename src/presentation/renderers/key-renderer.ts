@@ -8,6 +8,7 @@
 
 import type { AgentStatusViewModel } from "../view-models/agent-status.js";
 import type { GitViewModel } from "../view-models/git.js";
+import type { ProjectViewModel } from "../view-models/project.js";
 import type { UsageViewModel } from "../view-models/usage.js";
 import { Palette } from "../view-models/colors.js";
 
@@ -151,4 +152,25 @@ export function renderGitKey(vm: GitViewModel): string {
 		parts.push(text(fit(vm.detail, 14), 122, 16, Palette.textMuted, "400"));
 	}
 	return svgToDataUri(frame(parts.join("")));
+}
+
+/** Design §7.1 — the active project, and its branch when git knows one. */
+export function renderProjectKey(vm: ProjectViewModel): string {
+	const parts = [
+		text("PROJECT", 30, 17, Palette.textMuted, "600"),
+		text(fit(vm.name, 12), 70, 21, vm.available ? Palette.text : Palette.textMuted, "700"),
+	];
+	if (vm.detail.length > 0) {
+		parts.push(text(fit(vm.detail, 16), 100, 16, vm.color, "600"));
+	}
+	return svgToDataUri(frame(parts.join(""), { dimmed: !vm.available }));
+}
+
+/** Design §11 — an app to start, dimmed when it is not installed. */
+export function renderLauncherKey(vm: { name: string; detail: string; installed: boolean }): string {
+	const parts = [text(fit(vm.name, 12), 66, 21, vm.installed ? Palette.text : Palette.textMuted, "700")];
+	if (vm.detail.length > 0) {
+		parts.push(text(fit(vm.detail, 16), 100, 16, Palette.textMuted, "400"));
+	}
+	return svgToDataUri(frame(parts.join(""), { dimmed: !vm.installed }));
 }

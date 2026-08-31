@@ -14,6 +14,8 @@ import {
 	escapeXml,
 	renderAgentStatusKey,
 	renderGitKey,
+	renderLauncherKey,
+	renderProjectKey,
 	renderStopKey,
 	renderUsageKey,
 } from "../presentation/renderers/key-renderer.js";
@@ -21,12 +23,16 @@ import {
 	renderAgentSegment,
 	renderGitSegment,
 	renderOverviewSegment,
+	renderProjectSegment,
+	renderProviderSegment,
 	renderUsageSegment,
 	type SegmentFeedback,
 } from "../presentation/renderers/encoder-renderer.js";
 import { buildAgentStatusViewModel } from "../presentation/view-models/agent-status.js";
 import { buildGitViewModel } from "../presentation/view-models/git.js";
 import { buildOverviewViewModel } from "../presentation/view-models/overview.js";
+import { buildProjectViewModel } from "../presentation/view-models/project.js";
+import { buildProviderViewModel } from "../presentation/view-models/provider.js";
 import { buildUsageViewModel } from "../presentation/view-models/usage.js";
 import { Palette } from "../presentation/view-models/colors.js";
 
@@ -196,7 +202,8 @@ export function renderDeckPreview(layout: SegmentLayout): string {
 	const keyGap = 24;
 	const stripY = PAD + keySize * 2 + keyGap + 40;
 	const dialY = stripY + SEGMENT_HEIGHT + 26;
-	const height = dialY + 44 + PAD;
+	const altY = dialY + 78;
+	const height = altY + SEGMENT_HEIGHT + 24 + PAD;
 	const width = CONTENT + PAD * 2;
 
 	const keys = [
@@ -227,7 +234,13 @@ export function renderDeckPreview(layout: SegmentLayout): string {
 			}),
 		),
 		// Row 2 — the same actions, pointed at a second provider and other windows.
-		agentKey({ providerLabel: "Codex", providerStatus: "ready", session: session("idle") }),
+		renderProjectKey(
+			buildProjectViewModel({
+				active: { id: "p1", name: "agentdeck", path: "/src/agentdeck" },
+				total: 3,
+				gitSummary: "main",
+			}),
+		),
 		// Keeps the reset-time detail row rendered end to end.
 		usageKey({
 			providerLabel: "Claude",
@@ -235,6 +248,7 @@ export function renderDeckPreview(layout: SegmentLayout): string {
 			selection: { mode: "pinned", windowId: "claude.seven_day" },
 			showResetAt: true,
 		}),
+		renderLauncherKey({ name: "VS Code", detail: "agentdeck", installed: true }),
 		renderGitKey(
 			gitEntry({
 				path: "/docs",
@@ -253,14 +267,6 @@ export function renderDeckPreview(layout: SegmentLayout): string {
 				},
 			}),
 		),
-		// Keeps `remaining` mode rendered end to end; the preview is the only place
-		// this view-model option is drawn.
-		usageKey({
-			providerLabel: "Claude",
-			snapshot: claudeSnapshot(),
-			selection: { mode: "pinned", windowId: "claude.five_hour" },
-			displayMode: "remaining",
-		}),
 	];
 
 	const segments = [
@@ -298,7 +304,12 @@ export function renderDeckPreview(layout: SegmentLayout): string {
 				},
 			}),
 		),
-		renderOverviewSegment(buildOverviewViewModel(OVERVIEW)),
+		renderProjectSegment(
+			buildProjectViewModel({
+				active: { id: "p1", name: "agentdeck", path: "/src/agentdeck" },
+				total: 3,
+			}),
+		),
 	];
 
 	const body = [
@@ -325,6 +336,14 @@ export function renderDeckPreview(layout: SegmentLayout): string {
 				label("ROTATE · PRESS", cx, dialY + 44, 9, "#4a4d52"),
 			].join("");
 		}),
+		// Segments are a per-encoder setting; these two are the alternatives to the
+		// defaults above.
+		label("OTHER SEGMENTS", PAD + 100, altY - 12, 10, "#4a4d52"),
+		`<g transform="translate(${PAD},${altY})">`,
+		`<rect x="-4" y="-4" width="${SEGMENT_WIDTH * 2 + 8}" height="${SEGMENT_HEIGHT + 8}" rx="10" fill="#0b0c0e"/>`,
+		`<g>${drawSegment(layout, renderOverviewSegment(buildOverviewViewModel(OVERVIEW)))}</g>`,
+		`<g transform="translate(${SEGMENT_WIDTH},0)">${drawSegment(layout, renderProviderSegment(buildProviderViewModel({ label: "Codex", status: "ready" })))}</g>`,
+		`</g>`,
 	].join("");
 
 	return document_(width, height, body);

@@ -17,18 +17,20 @@ import {
 	renderAgentSegment,
 	renderGitSegment,
 	renderOverviewSegment,
+	renderProjectSegment,
 	renderProviderSegment,
 	renderUsageSegment,
 } from "./renderers/encoder-renderer.js";
 import type { AgentStatusViewModel } from "./view-models/agent-status.js";
 import type { GitViewModel } from "./view-models/git.js";
 import type { OverviewViewModel } from "./view-models/overview.js";
+import type { ProjectViewModel } from "./view-models/project.js";
 import type { ProviderViewModel } from "./view-models/provider.js";
 import type { UsageViewModel } from "./view-models/usage.js";
 
 export type DeviceId = string;
 export type Column = 0 | 1 | 2 | 3;
-export const SEGMENT_KINDS = ["usage", "agent", "git", "overview", "provider"] as const;
+export const SEGMENT_KINDS = ["usage", "agent", "git", "project", "overview", "provider"] as const;
 export type SegmentKind = (typeof SEGMENT_KINDS)[number];
 
 export type DashboardMode = "dashboard" | "standalone";
@@ -37,9 +39,9 @@ export const DASHBOARD_COLUMNS: Readonly<Record<Column, SegmentKind>> = {
 	0: "usage",
 	1: "agent",
 	2: "git",
-	// With more than one provider registered, the side-by-side overview says more
-	// than a single provider's connection state (design §18).
-	3: "overview",
+	// Design §6.1 / instructions §8.2. This was `overview` while Project did not
+	// exist yet; the AI Overview is now one Segment setting away instead.
+	3: "project",
 };
 
 export const ENCODER_COLUMN_COUNT = 4;
@@ -57,6 +59,7 @@ export interface DashboardData {
 	agent: AgentStatusViewModel;
 	git: GitViewModel;
 	overview: OverviewViewModel;
+	project: ProjectViewModel;
 	provider: ProviderViewModel;
 }
 
@@ -183,6 +186,8 @@ export function renderSegment(kind: SegmentKind, data: DashboardData): SegmentFe
 			return renderGitSegment(data.git);
 		case "overview":
 			return renderOverviewSegment(data.overview);
+		case "project":
+			return renderProjectSegment(data.project);
 		case "provider":
 			return renderProviderSegment(data.provider);
 	}
