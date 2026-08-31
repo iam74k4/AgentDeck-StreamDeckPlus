@@ -89,6 +89,7 @@ export class AgentStatusAction extends SingletonAction<AgentStatusActionSettings
 		const viewModel = buildAgentStatusViewModel({
 			providerLabel: provider?.displayName ?? providerId,
 			providerStatus: snapshot?.status ?? "loading",
+			...(snapshot?.error === undefined ? {} : { errorCode: snapshot.error.code }),
 			session,
 		});
 

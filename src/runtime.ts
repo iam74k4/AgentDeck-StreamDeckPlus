@@ -99,8 +99,20 @@ export function createRuntime(options: RuntimeOptions): AgentDeckRuntime {
 	});
 
 	// Design §16.3: an agent event is a better git refresh trigger than a timer.
+	// Only the working → not-working transition counts. Firing on every
+	// session-updated would spawn a git process per event, and a provider that
+	// re-reports an idle session on each poll would do so continuously.
+	const wasWorking = new Set<string>();
 	registry.subscribe((event) => {
-		if (event.type === "session-updated" && event.session.state !== "working") {
+		if (event.type !== "session-updated") {
+			return;
+		}
+		const key = `${event.session.providerId}::${event.session.id}`;
+		if (event.session.state === "working") {
+			wasWorking.add(key);
+			return;
+		}
+		if (wasWorking.delete(key)) {
 			git.refreshWatched();
 		}
 	});

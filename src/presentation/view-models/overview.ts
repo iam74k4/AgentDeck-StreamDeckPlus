@@ -26,35 +26,35 @@ export interface OverviewViewModel {
 function short(entry: ProviderOverviewEntry): string {
 	const percent = entry.window === undefined ? "--" : `${Math.round(entry.window.usedPercent)}%`;
 	const label = entry.window?.label ?? "";
-	return `${entry.displayName} ${percent}${label.length > 0 ? ` ${label}` : ""}`;
+	// Staleness is per provider: a two-day-old reading behind a fresh one must not
+	// read as live just because it is not the headline.
+	const marker = entry.status === "stale" ? "!" : "";
+	return `${entry.displayName} ${percent}${marker}${label.length > 0 ? ` ${label}` : ""}`;
+}
+
+function emptyOverview(entries: readonly ProviderOverviewEntry[]): OverviewViewModel {
+	return {
+		headline: "AI OVERVIEW",
+		valueText: entries.length === 0 ? "--" : "…",
+		detail: entries.map((entry) => entry.displayName).join(" · "),
+		barPercent: 0,
+		color: Palette.idle,
+		available: false,
+	};
 }
 
 export function buildOverviewViewModel(entries: readonly ProviderOverviewEntry[]): OverviewViewModel {
-	const withWindows = entries.filter((entry) => entry.window !== undefined);
-
-	if (withWindows.length === 0) {
-		return {
-			headline: "AI OVERVIEW",
-			valueText: entries.length === 0 ? "--" : "…",
-			detail: entries.map((entry) => entry.displayName).join(" · "),
-			barPercent: 0,
-			color: Palette.idle,
-			available: false,
-		};
-	}
-
 	// Most constrained first; the rest keep registration order behind it.
-	const ranked = [...withWindows].sort((a, b) => (b.window?.usedPercent ?? 0) - (a.window?.usedPercent ?? 0));
+	const ranked = entries
+		.filter(
+			(entry): entry is ProviderOverviewEntry & { window: NonNullable<ProviderOverviewEntry["window"]> } =>
+				entry.window !== undefined,
+		)
+		.sort((a, b) => b.window.usedPercent - a.window.usedPercent);
+
 	const leader = ranked[0];
-	if (leader?.window === undefined) {
-		return {
-			headline: "AI OVERVIEW",
-			valueText: "--",
-			detail: "",
-			barPercent: 0,
-			color: Palette.idle,
-			available: false,
-		};
+	if (leader === undefined) {
+		return emptyOverview(entries);
 	}
 
 	// Every registered provider stays visible, including ones reporting nothing:

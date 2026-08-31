@@ -388,9 +388,9 @@ JSON で stdin に渡す。その中に次が含まれる。
 ```text
 Claude Code
    ↓ statusLine (JSON on stdin)
-bin/statusline.js   ← AgentDeckのbridge
+bin/statusline.mjs   ← AgentDeckのbridge
    ↓ atomic write
-%LOCALAPPDATA%\AgentDeck\claude-status.json
+%LOCALAPPDATA%\AgentDeck\ (Windows)
    ↓
 ClaudeStatusFileSource → StatusLineUsageParser → UsageSnapshot
 ```
@@ -404,10 +404,17 @@ bridge は既存の status line を奪わない。`--then "<元のコマンド>"
 不正な入力・書き込み失敗・チェーン先の異常終了、いずれでも exit 0 を返す
 （デッキが止まることより、ユーザーの status line が壊れることの方が問題が大きい）。
 
-実機の bridge 動作は検証済み。ビルド済み `bin/statusline.js` に実 payload を
-流し、(1) ファイル書き出しとチェーン先出力の両立、(2) 単体使用時の無出力、
-(3) 壊れた stdin でも status line が生存、(4) チェーン先が exit 3 でも exit 0、
-の4点を確認した。
+実機の bridge 動作は検証済み。ビルド済み `bin/statusline.mjs` に実 payload を
+流し、次を確認した。
+
+- Node 20 / 21 / 22 のいずれでも exit 0（**拡張子は `.js` ではなく `.mjs`**。
+  インストール先の `.sdPlugin` に package.json が無いため、`.js` は CommonJS と
+  解釈され、ESM構文検出のない Node では読み込みに失敗する）
+- ファイル書き出しとチェーン先出力の両立、単体使用時の無出力
+- 壊れた stdin でも status line が生存、チェーン先が exit 3 でも exit 0
+- 2セッション同時でも互いを上書きしない（セッション単位のファイル）
+- `session_id` にパストラバーサルを仕込んでもディレクトリ外へ出ない
+- rename 失敗時に一時ファイルを残さない
 
 ### Claude は監視のみ
 
@@ -436,7 +443,7 @@ Touch Strip 第4列の既定を `PROVIDER` から `OVERVIEW` へ変更した（�
 
 ---
 
-## 6. 次段階（v0.1 Control Core）で残っている作業
+## 7. 次段階で残っている作業
 
 指示書 §4 に対する残タスク。指示書 §2.2 に従い、本Spikeでは着手していない。
 

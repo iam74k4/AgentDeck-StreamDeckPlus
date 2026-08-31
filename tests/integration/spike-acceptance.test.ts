@@ -37,6 +37,8 @@ import { waitFor } from "../helpers/wait.js";
 const FAKE_SERVER = fileURLToPath(new URL("../helpers/fake-codex-app-server.mjs", import.meta.url));
 
 let repo: string;
+/** Isolated Claude bridge directory: tests must never read the real home. */
+let bridgeDir: string;
 let runtime: AgentDeckRuntime | undefined;
 
 /** A stand-in for one 200x100 encoder region. */
@@ -51,6 +53,8 @@ class FakeEncoder implements EncoderContext {
 function makeRuntime(env: NodeJS.ProcessEnv = {}): { runtime: AgentDeckRuntime; encoders: FakeEncoder[] } {
 	const created = createRuntime({
 		logger: createLogger({ sink: nullSink }),
+		// Without this, Claude would read the developer's own ~/.agentdeck.
+		claude: { statusDir: bridgeDir },
 		codex: {
 			executable: process.execPath,
 			args: [FAKE_SERVER],
@@ -72,6 +76,7 @@ function makeRuntime(env: NodeJS.ProcessEnv = {}): { runtime: AgentDeckRuntime; 
 }
 
 beforeAll(() => {
+	bridgeDir = mkdtempSync(join(tmpdir(), "agentdeck-bridge-"));
 	repo = mkdtempSync(join(tmpdir(), "agentdeck-spike-"));
 	const env = {
 		...process.env,
@@ -94,6 +99,7 @@ afterEach(async () => {
 
 afterAll(() => {
 	rmSync(repo, { recursive: true, force: true });
+	rmSync(bridgeDir, { recursive: true, force: true });
 });
 
 describe("technical spike acceptance", () => {
@@ -187,6 +193,7 @@ describe("technical spike acceptance", () => {
 	it("keeps the deck readable when the Codex CLI is not installed", async () => {
 		const created = createRuntime({
 			logger: createLogger({ sink: nullSink }),
+			claude: { statusDir: bridgeDir },
 			codex: { executable: "definitely-not-codex-xyz", autoRestart: false },
 		});
 		runtime = created;
@@ -206,8 +213,8 @@ describe("technical spike acceptance", () => {
 		await rt.start();
 		await waitFor(() => rt.sessions.list().length > 0);
 
-		await waitFor(() => rt.sessions.list().every((session) => session.state === "disconnected"), {
-			message: "sessions were never marked disconnected",
+		await waitFor(() => rt.sessions.list("codex").every((session) => session.state === "disconnected"), {
+			message: "codex sessions were never marked disconnected",
 		});
 		rt.refreshDashboard();
 

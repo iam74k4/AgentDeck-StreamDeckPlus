@@ -7,6 +7,7 @@
 
 import type { AgentSession } from "../../domain/session.js";
 import { sessionStateLabel } from "../../domain/session.js";
+import { errorBadge, type AgentDeckErrorCode } from "../../domain/errors.js";
 import type { ProviderStatus } from "../../domain/usage.js";
 import { sessionStateColor, providerStatusColor, Palette } from "./colors.js";
 
@@ -22,6 +23,8 @@ export interface AgentStatusViewModel {
 export interface AgentStatusInput {
 	providerLabel: string;
 	providerStatus: ProviderStatus;
+	/** Distinguishes "sign in" from "the bridge was never set up". */
+	errorCode?: AgentDeckErrorCode;
 	session?: AgentSession;
 	now?: Date;
 }
@@ -51,10 +54,13 @@ export function buildAgentStatusViewModel(input: AgentStatusInput): AgentStatusV
 		};
 	}
 	if (input.providerStatus === "login-required") {
+		// `login-required` covers both "not signed in" and "bridge not configured";
+		// only the error code separates them, so the badge comes from there.
+		const notConfigured = input.errorCode === "NOT_CONFIGURED";
 		return {
 			providerLabel: input.providerLabel,
-			stateLabel: "LOGIN",
-			detail: "sign in",
+			stateLabel: notConfigured ? errorBadge("NOT_CONFIGURED") : "LOGIN",
+			detail: notConfigured ? "setup needed" : "sign in",
 			color: providerStatusColor(input.providerStatus),
 			interruptible: false,
 		};

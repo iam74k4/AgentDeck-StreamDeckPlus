@@ -133,6 +133,7 @@ export class UiCoordinator {
 			agent: buildAgentStatusViewModel({
 				providerLabel,
 				providerStatus: snapshot?.status ?? "loading",
+				...(snapshot?.error === undefined ? {} : { errorCode: snapshot.error.code }),
 				session,
 				now,
 			}),

@@ -56,7 +56,7 @@ export default [
 	{
 		input: "src/statusline.ts",
 		output: {
-			file: `${sdPlugin}/bin/statusline.js`,
+			file: `${sdPlugin}/bin/statusline.mjs`,
 			format: "es",
 			sourcemap: isWatching,
 		},

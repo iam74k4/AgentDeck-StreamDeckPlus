@@ -8,10 +8,11 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { AgentDeckError } from "@/domain/errors.js";
 import type { AgentProvider } from "@/providers/provider.js";
+import { buildAgentStatusViewModel } from "@/presentation/view-models/agent-status.js";
 import { createLogger, nullSink } from "@/infrastructure/logger.js";
 import { ClaudeProvider, MIN_CLAUDE_REFRESH_INTERVAL_MS } from "@/providers/claude/claude-provider.js";
 import { parseSession, StatusLineUsageParser } from "@/providers/claude/claude-usage-parser.js";
-import { agentDeckDataDir, claudeStatusPath } from "@/providers/claude/bridge-path.js";
+import { agentDeckDataDir, claudeStatusFilename } from "@/providers/claude/bridge-path.js";
 import { ClaudeStatusFileSource } from "@/providers/claude/status-file-source.js";
 import { CLAUDE_BRIDGE_FORMAT } from "@/providers/claude/status-payload.js";
 import { buildOverviewViewModel } from "@/presentation/view-models/overview.js";
@@ -105,54 +106,147 @@ describe("bridge file source", () => {
 	const envelope = (payload: unknown, capturedAt: number): string =>
 		JSON.stringify({ v: CLAUDE_BRIDGE_FORMAT, capturedAt, status: payload });
 
-	it("reads a reading the bridge wrote", async () => {
-		const now = new Date(1_700_000_100_000);
-		const source = new ClaudeStatusFileSource({
-			path: "/x/claude-status.json",
-			now: () => now,
-			read: async () => envelope(fixture("status-full"), 1_700_000_000_000),
+	const source = (options: {
+		files: Record<string, string>;
+		now?: Date;
+		freshnessMs?: number;
+		retentionMs?: number;
+		removed?: string[];
+	}): ClaudeStatusFileSource =>
+		new ClaudeStatusFileSource({
+			dir: "/x",
+			...(options.now === undefined ? {} : { now: () => options.now as Date }),
+			...(options.freshnessMs === undefined ? {} : { freshnessMs: options.freshnessMs }),
+			...(options.retentionMs === undefined ? {} : { retentionMs: options.retentionMs }),
+			list: async () => Object.keys(options.files),
+			read: async (path) => {
+				const body = options.files[path.replace(/^\/x[/\\]/, "")];
+				if (body === undefined) {
+					throw new Error(`unexpected read: ${path}`);
+				}
+				return body;
+			},
+			remove: async (path) => {
+				options.removed?.push(path);
+			},
 		});
 
-		const reading = await source.read();
+	it("reads a reading the bridge wrote", async () => {
+		const reading = await source({
+			files: { "claude-status.a.json": envelope(fixture("status-full"), 1_700_000_000_000) },
+			now: new Date(1_700_000_100_000),
+		}).read();
+
 		expect(reading.capturedAt.getTime()).toBe(1_700_000_000_000);
 		expect(reading.stale).toBe(false);
 	});
 
-	it("marks a reading stale once Claude Code has stopped reporting", async () => {
-		const now = new Date(1_700_000_000_000 + 60 * 60_000);
-		const source = new ClaudeStatusFileSource({
-			path: "/x/claude-status.json",
-			freshnessMs: 30 * 60_000,
-			now: () => now,
-			read: async () => envelope(fixture("status-full"), 1_700_000_000_000),
-		});
-		expect((await source.read()).stale).toBe(true);
+	it("picks the most recent session when several are open", async () => {
+		const reading = await source({
+			files: {
+				"claude-status.older.json": envelope({ session_id: "older" }, 1_700_000_000_000),
+				"claude-status.newer.json": envelope({ session_id: "newer" }, 1_700_000_050_000),
+			},
+			now: new Date(1_700_000_060_000),
+		}).read();
+
+		// Two terminals no longer overwrite each other; the deck follows whichever
+		// session produced a message last.
+		expect(reading.payload.session_id).toBe("newer");
 	});
 
-	it("treats a missing file as 'the bridge is not set up yet'", async () => {
-		const source = new ClaudeStatusFileSource({
-			path: "/x/missing.json",
-			read: async () => {
-				const error: NodeJS.ErrnoException = new Error("nope");
-				error.code = "ENOENT";
-				throw error;
+	it("skips an unreadable reading rather than failing the whole scan", async () => {
+		const reading = await source({
+			files: {
+				"claude-status.broken.json": "{not json",
+				"claude-status.good.json": envelope({ session_id: "good" }, 1_700_000_000_000),
+			},
+			now: new Date(1_700_000_000_000),
+		}).read();
+		expect(reading.payload.session_id).toBe("good");
+	});
+
+	it("deletes readings past the retention window", async () => {
+		const removed: string[] = [];
+		const store = source({
+			files: {
+				"claude-status.ancient.json": envelope({ session_id: "ancient" }, 1_000_000_000_000),
+				"claude-status.fresh.json": envelope({ session_id: "fresh" }, 1_700_000_000_000),
+			},
+			now: new Date(1_700_000_000_000),
+			removed,
+		});
+
+		expect((await store.read()).payload.session_id).toBe("fresh");
+		await new Promise((resolve) => setImmediate(resolve));
+		expect(removed.join()).toContain("ancient");
+	});
+
+	it("marks a reading stale once Claude Code has stopped reporting", async () => {
+		const reading = await source({
+			files: { "claude-status.a.json": envelope(fixture("status-full"), 1_700_000_000_000) },
+			now: new Date(1_700_000_000_000 + 60 * 60_000),
+			freshnessMs: 30 * 60_000,
+		}).read();
+		expect(reading.stale).toBe(true);
+	});
+
+	it("says the bridge is not configured, not that the user must sign in", async () => {
+		const empty = new ClaudeStatusFileSource({ dir: "/x", list: async () => [] });
+		await expect(empty.read()).rejects.toMatchObject({ code: "NOT_CONFIGURED" });
+
+		// A directory that does not exist is the same situation.
+		const missing = new ClaudeStatusFileSource({
+			dir: "/x",
+			list: async () => {
+				throw new Error("ENOENT");
 			},
 		});
-		await expect(source.read()).rejects.toMatchObject({ code: "NOT_AUTHENTICATED" });
+		await expect(missing.read()).rejects.toMatchObject({ code: "NOT_CONFIGURED" });
 	});
 
 	it("reports malformed content as a protocol error", async () => {
-		const bad = new ClaudeStatusFileSource({ path: "/x/a.json", read: async () => "{not json" });
-		await expect(bad.read()).rejects.toMatchObject({ code: "PROTOCOL_ERROR" });
-
-		const empty = new ClaudeStatusFileSource({ path: "/x/a.json", read: async () => "{}" });
-		await expect(empty.read()).rejects.toMatchObject({ code: "PROTOCOL_ERROR" });
+		await expect(source({ files: { "claude-status.a.json": "{not json" } }).read()).rejects.toMatchObject({
+			code: "PROTOCOL_ERROR",
+		});
+		await expect(source({ files: { "claude-status.a.json": "{}" } }).read()).rejects.toMatchObject({
+			code: "PROTOCOL_ERROR",
+		});
 	});
 
-	it("resolves the bridge path per platform", () => {
-		expect(agentDeckDataDir({ LOCALAPPDATA: "C:\\Users\\dev\\AppData\\Local" })).toContain("AgentDeck");
-		expect(claudeStatusPath({ LOCALAPPDATA: "C:\\x" })).toMatch(/claude-status\.json$/);
-		expect(claudeStatusPath({})).toMatch(/claude-status\.json$/);
+	it("reports availability through the same seam it reads through", async () => {
+		const listed: string[] = [];
+		const store = new ClaudeStatusFileSource({
+			dir: "/x",
+			list: async (dir) => {
+				listed.push(dir);
+				return ["claude-status.a.json", "unrelated.txt"];
+			},
+		});
+
+		await expect(store.isConfigured()).resolves.toBe(true);
+		// No filesystem access outside the injected seam.
+		expect(listed).toEqual(["/x"]);
+	});
+
+	it("ignores files that are not bridge readings", async () => {
+		const store = new ClaudeStatusFileSource({ dir: "/x", list: async () => ["notes.txt", "README.md"] });
+		await expect(store.isConfigured()).resolves.toBe(false);
+	});
+
+	it("keeps a session id from escaping the bridge directory", () => {
+		expect(claudeStatusFilename("../../etc/passwd")).toBe("claude-status.....etcpasswd.json");
+		expect(claudeStatusFilename(undefined)).toBe("claude-status.json");
+		expect(claudeStatusFilename("!!!")).toBe("claude-status.json");
+	});
+
+	it("uses LOCALAPPDATA on Windows only", () => {
+		const env = { LOCALAPPDATA: "C:\\Users\\dev\\AppData\\Local" };
+		expect(agentDeckDataDir(env, "win32")).toContain("AgentDeck");
+		// A stray export on macOS/Linux must not send the bridge somewhere the
+		// GUI-launched Stream Deck app would never look.
+		expect(agentDeckDataDir(env, "linux")).not.toContain("AppData");
+		expect(agentDeckDataDir(env, "darwin")).toMatch(/\.agentdeck$/);
 	});
 });
 
@@ -161,7 +255,12 @@ describe("claude provider", () => {
 		return new ClaudeProvider({
 			logger,
 			now: () => now,
-			source: new ClaudeStatusFileSource({ path: "/x/claude-status.json", now: () => now, read }),
+			source: new ClaudeStatusFileSource({
+				dir: "/x",
+				now: () => now,
+				list: async () => ["claude-status.a.json"],
+				read,
+			}),
 		});
 	}
 
@@ -190,16 +289,35 @@ describe("claude provider", () => {
 		await expect(provider.listSessions()).resolves.toHaveLength(1);
 	});
 
-	it("reports LOGIN while the bridge has never run", async () => {
-		const provider = providerWith(async () => {
-			const error: NodeJS.ErrnoException = new Error("nope");
-			error.code = "ENOENT";
-			throw error;
+	it("tells the user to set up the bridge rather than to sign in", async () => {
+		const provider = new ClaudeProvider({
+			logger,
+			source: new ClaudeStatusFileSource({ dir: "/x", list: async () => [] }),
 		});
-		const snapshot = await provider.refreshUsage();
+		await expect(provider.refreshUsage()).rejects.toMatchObject({ code: "NOT_CONFIGURED" });
 
-		expect(snapshot.status).toBe("login-required");
+		const snapshot = provider.usageSnapshot();
+		expect(snapshot.error?.code).toBe("NOT_CONFIGURED");
 		expect(snapshot.windows).toEqual([]);
+
+		// The key says SETUP, not LOGIN: re-authenticating would change nothing.
+		const vm = buildAgentStatusViewModel({
+			providerLabel: "Claude",
+			providerStatus: snapshot.status,
+			errorCode: snapshot.error?.code,
+		});
+		expect(vm.stateLabel).toBe("SETUP");
+		expect(vm.detail).toBe("setup needed");
+	});
+
+	it("still says LOGIN for a genuine sign-in failure", () => {
+		const vm = buildAgentStatusViewModel({
+			providerLabel: "Codex",
+			providerStatus: "login-required",
+			errorCode: "NOT_AUTHENTICATED",
+		});
+		expect(vm.stateLabel).toBe("LOGIN");
+		expect(vm.detail).toBe("sign in");
 	});
 
 	it("keeps the last windows and reads STALE once reporting stops", async () => {
@@ -208,9 +326,10 @@ describe("claude provider", () => {
 			logger,
 			now: () => now,
 			source: new ClaudeStatusFileSource({
-				path: "/x/a.json",
+				dir: "/x",
 				freshnessMs: 30 * 60_000,
 				now: () => now,
+				list: async () => ["claude-status.a.json"],
 				read: good(),
 			}),
 		});
@@ -240,10 +359,56 @@ describe("claude provider", () => {
 		expect(events).not.toContain("session-updated");
 	});
 
-	it("floors the refresh interval", () => {
+	it("floors the refresh interval instead of trusting the settings value", () => {
 		const provider = providerWith(good());
-		expect(() => provider.configure({ refreshIntervalMs: 1 })).not.toThrow();
-		expect(MIN_CLAUDE_REFRESH_INTERVAL_MS).toBeGreaterThan(1);
+		expect(provider.refreshIntervalMs).toBe(30_000);
+
+		provider.configure({ refreshIntervalMs: 1 });
+		expect(provider.refreshIntervalMs).toBe(MIN_CLAUDE_REFRESH_INTERVAL_MS);
+
+		provider.configure({ refreshIntervalMs: 90_000 });
+		expect(provider.refreshIntervalMs).toBe(90_000);
+	});
+
+	it("re-arms the timer on a settings change without flashing OFFLINE", async () => {
+		const provider = providerWith(good());
+		await provider.start();
+
+		const events: string[] = [];
+		provider.subscribe((event) => events.push(event.type));
+		provider.configure({ refreshIntervalMs: 60_000 });
+
+		// A Property Inspector edit arrives as several writes; tearing the provider
+		// down for each would emit a disconnected session every time.
+		expect(events).not.toContain("session-updated");
+		expect(provider.refreshIntervalMs).toBe(60_000);
+		await provider.stop();
+	});
+
+	it("re-emits a session whose label changed", async () => {
+		let name = "api-work";
+		const provider = new ClaudeProvider({
+			logger,
+			source: new ClaudeStatusFileSource({
+				dir: "/x",
+				list: async () => ["claude-status.a.json"],
+				read: async () =>
+					JSON.stringify({
+						v: CLAUDE_BRIDGE_FORMAT,
+						capturedAt: Date.now(),
+						status: { session_id: "S1", session_name: name, model: { id: "claude-opus-5" } },
+					}),
+			}),
+		});
+
+		await provider.refreshUsage();
+		const events: string[] = [];
+		provider.subscribe((event) => events.push(event.type));
+
+		name = "billing-fix";
+		await provider.refreshUsage();
+		expect(events).toContain("session-updated");
+		expect((await provider.listSessions())[0]?.label).toBe("billing-fix");
 	});
 
 	it("marks its session disconnected on stop", async () => {
@@ -258,11 +423,44 @@ describe("claude provider", () => {
 		expect(sessions[0]?.state).toBe("disconnected");
 	});
 
-	it("never throws out of refreshUsage, whatever the file contains", async () => {
+	it("reports a bad file as a rejection while still publishing the snapshot", async () => {
 		for (const body of ["", "null", "[]", '{"status":null}', "{not json"]) {
 			const provider = providerWith(async () => body);
-			await expect(provider.refreshUsage()).resolves.toBeDefined();
+			const events: string[] = [];
+			provider.subscribe((event) => events.push(event.type));
+
+			// The caller is told, so its error handling is real code rather than an
+			// unreachable catch — and the deck still receives a degraded snapshot.
+			await expect(provider.refreshUsage()).rejects.toBeDefined();
+			expect(events).toContain("usage-updated");
 		}
+	});
+
+	it("keeps polling after a failed read", async () => {
+		let fail = true;
+		const provider = new ClaudeProvider({
+			logger,
+			refreshIntervalMs: MIN_CLAUDE_REFRESH_INTERVAL_MS,
+			source: new ClaudeStatusFileSource({
+				dir: "/x",
+				list: async () => ["claude-status.a.json"],
+				read: async () => {
+					if (fail) {
+						throw new AgentDeckError("PROTOCOL_ERROR", "boom");
+					}
+					return JSON.stringify({ v: 1, capturedAt: Date.now(), status: fixture("status-full") });
+				},
+			}),
+		});
+
+		// start() must survive the initial failure rather than propagating it.
+		await expect(provider.start()).resolves.toBeUndefined();
+		expect(provider.usageSnapshot().status).toBe("error");
+
+		fail = false;
+		await provider.refreshUsage();
+		expect(provider.usageSnapshot().status).toBe("ready");
+		await provider.stop();
 	});
 });
 
@@ -304,6 +502,25 @@ describe("AI overview (design §18)", () => {
 		expect(vm.detail).toContain("STALE");
 	});
 
+	it("flags a stale provider that is not the leader", () => {
+		// A days-old reading behind a fresh one must not read as live.
+		const vm = buildOverviewViewModel([
+			entry("codex", "Codex", 96, "7d"),
+			entry("claude", "Claude", 41, "5h", "stale"),
+		]);
+
+		expect(vm.headline).toBe("CODEX 7d");
+		expect(vm.detail).toBe("Claude 41%! 5h");
+	});
+
+	it("leaves a fresh non-leader unmarked", () => {
+		const vm = buildOverviewViewModel([
+			entry("codex", "Codex", 96, "7d"),
+			entry("claude", "Claude", 41, "5h"),
+		]);
+		expect(vm.detail).toBe("Claude 41% 5h");
+	});
+
 	it("degrades when nothing has reported yet", () => {
 		expect(buildOverviewViewModel([]).valueText).toBe("--");
 		const loading = buildOverviewViewModel([entry("codex", "Codex"), entry("claude", "Claude")]);
@@ -328,13 +545,14 @@ describe("no credential ever leaves the provider", () => {
 		const provider = new ClaudeProvider({
 			logger: capture,
 			source: new ClaudeStatusFileSource({
-				path: "/x/a.json",
+				dir: "/x",
+				list: async () => ["claude-status.a.json"],
 				read: async () => {
 					throw new AgentDeckError("PROTOCOL_ERROR", "boom");
 				},
 			}),
 		});
-		await provider.refreshUsage();
+		await expect(provider.refreshUsage()).rejects.toBeDefined();
 
 		// Design §10.3 / §22.1: the provider reads no credential, and nothing it
 		// does log carries one.
@@ -343,12 +561,13 @@ describe("no credential ever leaves the provider", () => {
 		}
 	});
 
-	it("reads only the bridge file", async () => {
+	it("reads only the bridge directory", async () => {
 		const opened: string[] = [];
 		const provider = new ClaudeProvider({
 			logger,
 			source: new ClaudeStatusFileSource({
-				path: "/x/claude-status.json",
+				dir: "/x",
+				list: async () => ["claude-status.a.json"],
 				read: async (path) => {
 					opened.push(path);
 					return JSON.stringify({ v: 1, capturedAt: Date.now(), status: {} });
@@ -356,6 +575,6 @@ describe("no credential ever leaves the provider", () => {
 			}),
 		});
 		await provider.refreshUsage();
-		expect(opened).toEqual(["/x/claude-status.json"]);
+		expect(opened.every((path) => path.includes("claude-status"))).toBe(true);
 	});
 });

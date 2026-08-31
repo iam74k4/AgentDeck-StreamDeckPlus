@@ -27,7 +27,7 @@ import type { Logger } from "../../infrastructure/logger.js";
 import { createLogger, nullSink } from "../../infrastructure/logger.js";
 import { scheduleInterval, type ScheduledTask } from "../../infrastructure/scheduler.js";
 import type { AgentProvider, ProviderLifecycleState } from "../provider.js";
-import { claudeStatusPath } from "./bridge-path.js";
+import { agentDeckDataDir } from "./bridge-path.js";
 import { parseSession, StatusLineUsageParser, type ClaudeUsageParser } from "./claude-usage-parser.js";
 import { ClaudeStatusFileSource } from "./status-file-source.js";
 
@@ -38,8 +38,8 @@ export const MIN_CLAUDE_REFRESH_INTERVAL_MS = 5_000;
 
 export interface ClaudeProviderOptions {
 	logger?: Logger;
-	/** Overrides where the status-line bridge writes. */
-	statusFilePath?: string;
+	/** Overrides the directory the status-line bridge writes into. */
+	statusDir?: string;
 	/** Design §17.4 — Claude refresh interval. */
 	refreshIntervalMs?: number;
 	/** How long a bridge reading stays current before it reads as stale. */
@@ -85,7 +85,7 @@ export class ClaudeProvider implements AgentProvider {
 		this.#source =
 			options.source ??
 			new ClaudeStatusFileSource({
-				path: options.statusFilePath ?? claudeStatusPath(options.env),
+				dir: options.statusDir ?? agentDeckDataDir(options.env),
 				logger: this.#logger,
 				...(options.freshnessMs === undefined ? {} : { freshnessMs: options.freshnessMs }),
 				...(options.now === undefined ? {} : { now: options.now }),
@@ -114,9 +114,9 @@ export class ClaudeProvider implements AgentProvider {
 		return this.#stale ? "stale" : "ready";
 	}
 
-	/** The path the user must point Claude Code's `statusLine` at. */
-	public get bridgePath(): string {
-		return this.#source.path;
+	/** Where the bridge writes; surfaced for diagnostics and setup guidance. */
+	public get bridgeDir(): string {
+		return this.#source.dir;
 	}
 
 	public subscribe(listener: ProviderEventListener): Unsubscribe {
@@ -142,18 +142,7 @@ export class ClaudeProvider implements AgentProvider {
 		}
 
 		this.#state = "ready";
-		this.#poll?.stop();
-		this.#poll = scheduleInterval(
-			this.#refreshIntervalMs,
-			async () => {
-				try {
-					await this.refreshUsage();
-				} catch (error) {
-					this.#logger.debug("claude refresh failed", error);
-				}
-			},
-			{ onError: (error) => this.#logger.debug("claude poll error", error) },
-		);
+		this.#startPolling();
 		this.#emitHealth();
 	}
 
@@ -187,6 +176,12 @@ export class ClaudeProvider implements AgentProvider {
 				code: this.#lastError.code,
 				message: this.#lastError.message,
 			});
+			// The snapshot is published either way — a degraded reading still has to
+			// reach the deck — but the failure is rethrown so callers can react to
+			// it rather than silently receiving a stale-looking success.
+			const degraded = this.usageSnapshot();
+			this.#emit({ type: "usage-updated", snapshot: degraded });
+			throw this.#lastError;
 		}
 
 		const snapshot = this.usageSnapshot();
@@ -214,7 +209,13 @@ export class ClaudeProvider implements AgentProvider {
 		return snapshot;
 	}
 
-	/** Applies a changed global setting (design §17.4). */
+	/**
+	 * Applies a changed global setting (design §17.4).
+	 *
+	 * Re-arms the timer in place rather than restarting: a Property Inspector
+	 * edit arrives as several settings writes, and tearing the provider down for
+	 * each would flash the Agent key OFFLINE and fire the git watcher every time.
+	 */
 	public configure(update: { refreshIntervalMs?: number }): void {
 		const next = clampRefreshInterval(update.refreshIntervalMs);
 		if (next === this.#refreshIntervalMs) {
@@ -222,8 +223,28 @@ export class ClaudeProvider implements AgentProvider {
 		}
 		this.#refreshIntervalMs = next;
 		if (this.#poll !== undefined) {
-			void this.stop().then(() => this.start());
+			this.#startPolling();
 		}
+	}
+
+	/** Effective interval after clamping; exposed so the floor can be asserted. */
+	public get refreshIntervalMs(): number {
+		return this.#refreshIntervalMs;
+	}
+
+	#startPolling(): void {
+		this.#poll?.stop();
+		this.#poll = scheduleInterval(
+			this.#refreshIntervalMs,
+			async () => {
+				try {
+					await this.refreshUsage();
+				} catch (error) {
+					this.#logger.debug("claude refresh failed", error);
+				}
+			},
+			{ onError: (error) => this.#logger.debug("claude poll error", error) },
+		);
 	}
 
 	#emitHealth(): void {
@@ -242,6 +263,14 @@ export class ClaudeProvider implements AgentProvider {
 	}
 }
 
+/**
+ * Compares every field the deck actually renders.
+ *
+ * Comparing only id/model meant a renamed session never reached the key, which
+ * kept showing the old label until the model changed or the plugin restarted.
+ */
 function sameSession(a: AgentSession | undefined, b: AgentSession): boolean {
-	return a !== undefined && a.id === b.id && a.modelId === b.modelId && a.state === b.state;
+	return (
+		a !== undefined && a.id === b.id && a.modelId === b.modelId && a.state === b.state && a.label === b.label
+	);
 }

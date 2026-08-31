@@ -97,7 +97,10 @@ export function mostConstrainedWindow(windows: readonly UsageWindow[]): UsageWin
 /** Maps a transport-level failure onto the provider status machine (design §17.3). */
 export function providerStatusForError(code: AgentDeckErrorCode, hasCachedSnapshot: boolean): ProviderStatus {
 	switch (code) {
+		// Both mean "no data until the user does something"; the badge, taken from
+		// the error code rather than the status, is what tells them which.
 		case "NOT_AUTHENTICATED":
+		case "NOT_CONFIGURED":
 			return "login-required";
 		case "CLI_NOT_FOUND":
 			return "cli-not-found";

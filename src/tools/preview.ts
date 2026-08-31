@@ -228,10 +228,12 @@ export function renderDeckPreview(layout: SegmentLayout): string {
 		),
 		// Row 2 — the same actions, pointed at a second provider and other windows.
 		agentKey({ providerLabel: "Codex", providerStatus: "ready", session: session("idle") }),
+		// Keeps the reset-time detail row rendered end to end.
 		usageKey({
 			providerLabel: "Claude",
 			snapshot: claudeSnapshot(),
 			selection: { mode: "pinned", windowId: "claude.seven_day" },
+			showResetAt: true,
 		}),
 		renderGitKey(
 			gitEntry({
@@ -251,10 +253,13 @@ export function renderDeckPreview(layout: SegmentLayout): string {
 				},
 			}),
 		),
+		// Keeps `remaining` mode rendered end to end; the preview is the only place
+		// this view-model option is drawn.
 		usageKey({
 			providerLabel: "Claude",
 			snapshot: claudeSnapshot(),
 			selection: { mode: "pinned", windowId: "claude.five_hour" },
+			displayMode: "remaining",
 		}),
 	];
 
@@ -374,7 +379,16 @@ export function renderStatePreview(): string {
 		{
 			key: agentKey({ providerLabel: "Codex", providerStatus: "login-required" }),
 			caption: "LOGIN",
-			note: "sign in / bridge not set up",
+			note: "account not signed in",
+		},
+		{
+			key: agentKey({
+				providerLabel: "Claude",
+				providerStatus: "login-required",
+				errorCode: "NOT_CONFIGURED",
+			}),
+			caption: "SETUP",
+			note: "Claude bridge not configured",
 		},
 		{
 			key: usageKey({
@@ -388,15 +402,23 @@ export function renderStatePreview(): string {
 		{
 			key: usageKey({
 				providerLabel: "Codex",
-				snapshot: snapshot({ status: "rate-limited" }),
-				selection: { mode: "pinned", windowId: "codex.secondary" },
+				snapshot: snapshot({
+					status: "rate-limited",
+					windows: [{ id: "codex.primary", label: "5h", usedPercent: 100 }],
+				}),
+				selection: { mode: "auto" },
 			}),
 			caption: "LIMIT",
 			note: "quota reached",
 		},
+		{
+			key: renderGitKey(gitEntry({ path: "/tmp", fetchedAt: NOW, errorCode: "GIT_NOT_REPOSITORY" })),
+			caption: "NO GIT",
+			note: "path is not a repository",
+		},
 	];
 
-	const columns = 5;
+	const columns = 4;
 	const cell = CONTENT / columns;
 	const keySize = 116;
 	const rowHeight = keySize + 54;

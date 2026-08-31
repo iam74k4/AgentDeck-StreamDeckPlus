@@ -103,7 +103,7 @@ status line:
 {
 	"statusLine": {
 		"type": "command",
-		"command": "node \"%LOCALAPPDATA%\\Elgato\\StreamDeck\\Plugins\\com.agentdeck.streamdeck-plus.sdPlugin\\bin\\statusline.js\""
+		"command": "node \"%APPDATA%\\Elgato\\StreamDeck\\Plugins\\com.agentdeck.streamdeck-plus.sdPlugin\\bin\\statusline.mjs\""
 	}
 }
 ```
@@ -111,7 +111,7 @@ status line:
 Already have a status line? Keep it — the bridge chains:
 
 ```json
-"command": "node \"...\\bin\\statusline.js\" --then \"your-original-command\""
+"command": "node \"...\\bin\\statusline.mjs\" --then \"your-original-command\""
 ```
 
 Your command still receives the same stdin and its output is still what Claude
@@ -120,9 +120,10 @@ directory, or a chained command that exits non-zero all leave your status line
 intact.
 
 No credential is involved anywhere in this path. The bridge writes only what
-Claude Code handed it, to `%LOCALAPPDATA%\AgentDeck\claude-status.json`
-(`~/.agentdeck/claude-status.json` elsewhere), and the plugin reads only that
-file. Claude Code remains the only thing that touches your Anthropic account.
+Claude Code handed it, into `%LOCALAPPDATA%\AgentDeck\` on Windows
+(`~/.agentdeck/` elsewhere) — one file per Claude Code session, so two open
+terminals do not overwrite each other — and the plugin reads only that directory.
+Claude Code remains the only thing that touches your Anthropic account.
 
 One consequence worth knowing: Claude Code runs the status line only while a
 session is open, so the reading goes stale once you close it. The deck says so —
