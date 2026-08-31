@@ -7,7 +7,9 @@
  * does not repaint every key on the device.
  */
 
+import type { ApprovalService, PendingApproval } from "../application/approval-service.js";
 import type { GitService, GitStatusEntry } from "../application/git-service.js";
+import type { ModelService } from "../application/model-service.js";
 import type { ProjectService } from "../application/project-service.js";
 import type { ProviderRegistry } from "../application/provider-registry.js";
 import type { SessionService } from "../application/session-service.js";
@@ -19,12 +21,13 @@ import { scheduleInterval, type ScheduledTask } from "../infrastructure/schedule
 import type { DashboardData } from "./plus-dashboard-coordinator.js";
 import { buildAgentStatusViewModel } from "./view-models/agent-status.js";
 import { buildGitViewModel } from "./view-models/git.js";
+import { buildModelViewModel } from "./view-models/model.js";
 import { buildOverviewViewModel } from "./view-models/overview.js";
 import { buildProjectViewModel } from "./view-models/project.js";
 import { buildProviderViewModel } from "./view-models/provider.js";
 import { buildUsageViewModel } from "./view-models/usage.js";
 
-export type UiConcern = "usage" | "session" | "git" | "project" | "provider" | "tick";
+export type UiConcern = "usage" | "session" | "git" | "project" | "provider" | "approval" | "model" | "tick";
 
 export type UiListener = () => void;
 
@@ -41,6 +44,8 @@ export class UiCoordinator {
 	readonly #sessions: SessionService;
 	readonly #git: GitService;
 	readonly #projects: ProjectService;
+	readonly #approvals: ApprovalService;
+	readonly #models: ModelService;
 	readonly #logger: Logger | undefined;
 	readonly #listeners = new Map<UiConcern, Set<UiListener>>();
 	readonly #unsubscribes: Unsubscribe[] = [];
@@ -55,6 +60,8 @@ export class UiCoordinator {
 			sessions: SessionService;
 			git: GitService;
 			projects: ProjectService;
+			approvals: ApprovalService;
+			models: ModelService;
 		},
 		options: UiCoordinatorOptions = {},
 	) {
@@ -63,6 +70,8 @@ export class UiCoordinator {
 		this.#sessions = services.sessions;
 		this.#git = services.git;
 		this.#projects = services.projects;
+		this.#approvals = services.approvals;
+		this.#models = services.models;
 		this.#logger = options.logger?.child("ui");
 		this.#tickIntervalMs = options.tickIntervalMs ?? 1_000;
 		this.#now = options.now ?? (() => new Date());
@@ -75,6 +84,8 @@ export class UiCoordinator {
 			}),
 			this.#git.subscribe(() => this.invalidate("git")),
 			this.#projects.subscribe(() => this.invalidate("project")),
+			this.#approvals.subscribe(() => this.invalidate("approval")),
+			this.#models.subscribe(() => this.invalidate("model")),
 			this.#registry.subscribe((event) => {
 				if (event.type === "provider-status") {
 					this.invalidate("provider");
@@ -115,6 +126,11 @@ export class UiCoordinator {
 		return this.#git.get(path);
 	}
 
+	/** The approval the Approve / Deny keys act on, if any (design §12.4). */
+	public getCurrentApproval(providerId?: ProviderId): PendingApproval | undefined {
+		return this.#approvals.current(providerId);
+	}
+
 	/** Builds the four segment view models for the touch strip. */
 	public dashboardData(options: {
 		providerId: ProviderId;
@@ -148,6 +164,7 @@ export class UiCoordinator {
 			}),
 			overview: buildOverviewViewModel(this.#usage.overview()),
 			git: buildGitViewModel(repositoryPath === undefined ? undefined : this.#git.get(repositoryPath)),
+			model: buildModelViewModel(this.#models.getState(options.providerId)),
 			project: buildProjectViewModel({
 				...(active === undefined ? {} : { active }),
 				total: this.#projects.list().length,

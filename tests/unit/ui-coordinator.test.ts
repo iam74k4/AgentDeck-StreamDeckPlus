@@ -5,6 +5,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GitService } from "@/application/git-service.js";
 import { ProjectService } from "@/application/project-service.js";
+import { ApprovalService } from "@/application/approval-service.js";
+import { ModelService } from "@/application/model-service.js";
 import { ProviderRegistry } from "@/application/provider-registry.js";
 import { SessionService } from "@/application/session-service.js";
 import { UsageService } from "@/application/usage-service.js";
@@ -28,7 +30,12 @@ function setup(): { ui: UiCoordinator; provider: ControllableProvider; dispose: 
 		{ pollIntervalMs: 600_000 },
 	);
 	const projects = new ProjectService({ store: memoryProjectStore() });
-	const ui = new UiCoordinator({ registry, usage, sessions, git, projects }, { tickIntervalMs: 1_000 });
+	const approvals = new ApprovalService(registry);
+	const models = new ModelService(registry, sessions);
+	const ui = new UiCoordinator(
+		{ registry, usage, sessions, git, projects, approvals, models },
+		{ tickIntervalMs: 1_000 },
+	);
 	return {
 		ui,
 		provider,

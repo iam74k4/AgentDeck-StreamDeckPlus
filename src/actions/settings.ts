@@ -39,6 +39,17 @@ export interface StopActionSettings {
 	[key: string]: SettingsValue;
 }
 
+export interface ApprovalActionSettings {
+	/** Restricts the key to one provider's requests; empty follows every provider. */
+	providerId?: string;
+	/**
+	 * How long a high-risk approval must be held (design §22.2). Only the Approve
+	 * key reads it: Deny is always a single press.
+	 */
+	holdSeconds?: number;
+	[key: string]: SettingsValue;
+}
+
 export interface GitActionSettings {
 	repositoryPath?: string;
 	[key: string]: SettingsValue;

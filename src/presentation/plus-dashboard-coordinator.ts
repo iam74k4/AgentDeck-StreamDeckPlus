@@ -16,6 +16,7 @@ import type { SegmentFeedback } from "./renderers/encoder-renderer.js";
 import {
 	renderAgentSegment,
 	renderGitSegment,
+	renderModelSegment,
 	renderOverviewSegment,
 	renderProjectSegment,
 	renderProviderSegment,
@@ -23,6 +24,7 @@ import {
 } from "./renderers/encoder-renderer.js";
 import type { AgentStatusViewModel } from "./view-models/agent-status.js";
 import type { GitViewModel } from "./view-models/git.js";
+import type { ModelViewModel } from "./view-models/model.js";
 import type { OverviewViewModel } from "./view-models/overview.js";
 import type { ProjectViewModel } from "./view-models/project.js";
 import type { ProviderViewModel } from "./view-models/provider.js";
@@ -30,7 +32,7 @@ import type { UsageViewModel } from "./view-models/usage.js";
 
 export type DeviceId = string;
 export type Column = 0 | 1 | 2 | 3;
-export const SEGMENT_KINDS = ["usage", "agent", "git", "project", "overview", "provider"] as const;
+export const SEGMENT_KINDS = ["usage", "agent", "model", "git", "project", "overview", "provider"] as const;
 export type SegmentKind = (typeof SEGMENT_KINDS)[number];
 
 export type DashboardMode = "dashboard" | "standalone";
@@ -38,9 +40,10 @@ export type DashboardMode = "dashboard" | "standalone";
 export const DASHBOARD_COLUMNS: Readonly<Record<Column, SegmentKind>> = {
 	0: "usage",
 	1: "agent",
-	2: "git",
-	// Design §6.1 / instructions §8.2. This was `overview` while Project did not
-	// exist yet; the AI Overview is now one Segment setting away instead.
+	// Design §6.1 / instructions §8.2. Columns 2 and 3 were `git` and `overview`
+	// while Model and Project did not exist yet; both are one Segment setting
+	// away, so the default now matches the profile the design specifies.
+	2: "model",
 	3: "project",
 };
 
@@ -58,6 +61,7 @@ export interface DashboardData {
 	usage: UsageViewModel;
 	agent: AgentStatusViewModel;
 	git: GitViewModel;
+	model: ModelViewModel;
 	overview: OverviewViewModel;
 	project: ProjectViewModel;
 	provider: ProviderViewModel;
@@ -184,6 +188,8 @@ export function renderSegment(kind: SegmentKind, data: DashboardData): SegmentFe
 			return renderAgentSegment(data.agent);
 		case "git":
 			return renderGitSegment(data.git);
+		case "model":
+			return renderModelSegment(data.model);
 		case "overview":
 			return renderOverviewSegment(data.overview);
 		case "project":

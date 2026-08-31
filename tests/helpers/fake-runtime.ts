@@ -5,12 +5,16 @@
 
 import { GitService } from "@/application/git-service.js";
 import { ProjectService, type ProjectState, type ProjectStore } from "@/application/project-service.js";
+import { ApprovalService } from "@/application/approval-service.js";
+import { ModelService } from "@/application/model-service.js";
 import { ProviderRegistry } from "@/application/provider-registry.js";
 import { SessionService } from "@/application/session-service.js";
 import { UsageService } from "@/application/usage-service.js";
 import type { GitAdapter } from "@/adapters/git/git-adapter.js";
 import { LauncherRegistry, type AppLauncher } from "@/adapters/launcher/app-launcher.js";
+import type { ApprovalDecision, ApprovalRequest } from "@/domain/approval.js";
 import type { GitStatus } from "@/domain/git.js";
+import type { ModelDescriptor, ModelSelection } from "@/domain/model.js";
 import type { ProviderEvent, ProviderEventListener } from "@/domain/provider-events.js";
 import type { AgentSession } from "@/domain/session.js";
 import type { UsageSnapshot } from "@/domain/usage.js";
@@ -24,6 +28,14 @@ export class ControllableProvider implements AgentProvider {
 	public readonly id = "codex";
 	public readonly displayName = "Codex";
 	public interrupted: string[] = [];
+	public readonly answered: { id: string; decision: ApprovalDecision }[] = [];
+	public readonly applied: { sessionId: string; selection: ModelSelection }[] = [];
+	public models: ModelDescriptor[] = [
+		{ id: "gpt-5.1-codex", label: "GPT-5.1 Codex", reasoningLevels: ["medium", "high"] },
+		{ id: "gpt-5.1", label: "GPT-5.1" },
+	];
+	/** Set to make `getModels` reject, standing in for an offline provider. */
+	public modelsFail = false;
 	readonly #listeners = new Set<ProviderEventListener>();
 
 	public async isAvailable(): Promise<boolean> {
@@ -39,6 +51,22 @@ export class ControllableProvider implements AgentProvider {
 	}
 	public async refreshUsage(): Promise<UsageSnapshot> {
 		return usageSnapshot();
+	}
+
+	public async getModels(): Promise<ModelDescriptor[]> {
+		if (this.modelsFail) {
+			throw new Error("model/list unavailable");
+		}
+		return this.models;
+	}
+
+	public async applyModel(sessionId: string, selection: ModelSelection): Promise<void> {
+		this.applied.push({ sessionId, selection });
+	}
+
+	public async resolveApproval(approvalId: string, decision: ApprovalDecision): Promise<void> {
+		this.answered.push({ id: approvalId, decision });
+		this.emit({ type: "approval-resolved", approvalId });
 	}
 
 	public subscribe(listener: ProviderEventListener): () => void {
@@ -58,6 +86,20 @@ export class ControllableProvider implements AgentProvider {
 
 	public pushSession(session: AgentSession): void {
 		this.emit({ type: "session-updated", session });
+	}
+
+	public pushApproval(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest {
+		const request: ApprovalRequest = {
+			id: "req_1",
+			sessionId: "thr_1",
+			type: "command",
+			title: "npm test",
+			summary: "",
+			risk: "low",
+			...overrides,
+		};
+		this.emit({ type: "approval-requested", request });
+		return request;
 	}
 }
 
@@ -151,7 +193,10 @@ export function createFakeRuntime(
 		}),
 	});
 
-	const ui = new UiCoordinator({ registry, usage, sessions, git, projects });
+	const approvals = new ApprovalService(registry);
+	const models = new ModelService(registry, sessions);
+
+	const ui = new UiCoordinator({ registry, usage, sessions, git, projects, approvals, models });
 	const contexts: DashboardContext[] = [];
 	let dashboardContext: DashboardContext = {};
 
@@ -177,6 +222,8 @@ export function createFakeRuntime(
 		sessions,
 		git,
 		projects,
+		approvals,
+		models,
 		launchers,
 		ui,
 		dashboard,

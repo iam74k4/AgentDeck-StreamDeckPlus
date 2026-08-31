@@ -7,6 +7,8 @@
 
 import streamDeck from "@elgato/streamdeck";
 import { AgentStatusAction } from "./actions/agent-status-action.js";
+import { ApproveAction } from "./actions/approve-action.js";
+import { DenyAction } from "./actions/deny-action.js";
 import { LauncherAction } from "./actions/launcher-action.js";
 import { ProjectAction } from "./actions/project-action.js";
 import { DashboardEncoderAction } from "./actions/dashboard-encoder-action.js";
@@ -89,6 +91,8 @@ const runtime = createRuntime({
 
 streamDeck.actions.registerAction(new AgentStatusAction(runtime));
 streamDeck.actions.registerAction(new StopAction(runtime));
+streamDeck.actions.registerAction(new ApproveAction(runtime));
+streamDeck.actions.registerAction(new DenyAction(runtime));
 streamDeck.actions.registerAction(new UsageAction(runtime));
 streamDeck.actions.registerAction(new GitAction(runtime));
 streamDeck.actions.registerAction(new DashboardEncoderAction(runtime));

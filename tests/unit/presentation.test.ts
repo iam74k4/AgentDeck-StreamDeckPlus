@@ -13,14 +13,19 @@ import {
 } from "@/presentation/plus-dashboard-coordinator.js";
 import {
 	escapeXml,
+	estimateWidth,
 	fit,
 	renderAgentStatusKey,
+	renderApprovalKey,
 	renderStopKey,
 	renderUsageKey,
 } from "@/presentation/renderers/key-renderer.js";
 import { buildAgentStatusViewModel, formatElapsed } from "@/presentation/view-models/agent-status.js";
 import { buildUsageViewModel, formatResetIn } from "@/presentation/view-models/usage.js";
+import type { ApprovalRequest } from "@/domain/approval.js";
+import { buildApproveKeyViewModel, buildDenyKeyViewModel } from "@/presentation/view-models/approval.js";
 import { buildGitViewModel } from "@/presentation/view-models/git.js";
+import { buildModelViewModel } from "@/presentation/view-models/model.js";
 import { buildOverviewViewModel } from "@/presentation/view-models/overview.js";
 import { buildProjectViewModel } from "@/presentation/view-models/project.js";
 import { buildProviderViewModel } from "@/presentation/view-models/provider.js";
@@ -221,6 +226,16 @@ describe("four-encoder coordination (design §6.2, instructions §8.3)", () => {
 		usage: buildUsageViewModel({ providerLabel: "Codex", snapshot: snapshot(), selection: { mode: "auto" } }),
 		agent: buildAgentStatusViewModel({ providerLabel: "Codex", providerStatus: "ready" }),
 		git: buildGitViewModel(undefined),
+		model: buildModelViewModel({
+			providerId: "codex",
+			supported: true,
+			models: [{ id: "gpt-5.1-codex", label: "GPT-5.1 Codex" }],
+			choices: [{ modelId: "gpt-5.1-codex" }],
+			highlighted: { modelId: "gpt-5.1-codex" },
+			applied: { modelId: "gpt-5.1-codex" },
+			loading: false,
+			error: undefined,
+		}),
 		overview: buildOverviewViewModel([]),
 		project: buildProjectViewModel({ total: 0 }),
 		provider: buildProviderViewModel({ label: "Codex", status: "ready" }),
@@ -353,5 +368,61 @@ describe("four-encoder coordination (design §6.2, instructions §8.3)", () => {
 			}),
 		});
 		expect(feedback.bar.opacity).toBe(0);
+	});
+});
+
+describe("approval key rendering (design §12.4, §22.2)", () => {
+	const decode = (image: string): string =>
+		decodeURIComponent(image.replace("data:image/svg+xml;charset=utf8,", ""));
+
+	const request = (risk: "low" | "high"): ApprovalRequest => ({
+		id: "req_1",
+		sessionId: "thr_1",
+		type: "command",
+		title: risk === "high" ? "rm -rf build" : "npm run build",
+		summary: "",
+		risk,
+	});
+
+	it("labels a low-risk request APPROVE and a high-risk one HOLD", () => {
+		expect(decode(renderApprovalKey(buildApproveKeyViewModel({ request: request("low") })))).toContain(
+			"APPROVE",
+		);
+		expect(decode(renderApprovalKey(buildApproveKeyViewModel({ request: request("high") })))).toContain(
+			"HOLD",
+		);
+	});
+
+	it("keeps the plate label inside its plate", () => {
+		// The regression: at a fixed 24px, "APPROVE" overflowed the filled plate and
+		// — being drawn in the background colour — rendered as "PPROV".
+		const svg = decode(renderApprovalKey(buildApproveKeyViewModel({ request: request("low") })));
+		const plateWidth = Number(/<rect x="[\d.]+" y="34" width="([\d.]+)"/.exec(svg)?.[1]);
+		const fontSize = Number(/font-size="([\d.]+)" font-weight="700"/.exec(svg)?.[1]);
+
+		expect(plateWidth).toBeGreaterThan(0);
+		expect(estimateWidth("APPROVE", fontSize)).toBeLessThanOrEqual(plateWidth);
+	});
+
+	it("fills the hold ring in proportion to the hold", () => {
+		const none = decode(renderApprovalKey(buildApproveKeyViewModel({ request: request("high") })));
+		const half = decode(
+			renderApprovalKey(buildApproveKeyViewModel({ request: request("high"), holdProgress: 0.5 })),
+		);
+		// No arc at all until the key is actually being held.
+		expect(none).not.toContain("stroke-dashoffset");
+		expect(half).toContain("stroke-dashoffset");
+	});
+
+	it("dims and says so when there is nothing waiting", () => {
+		const svg = decode(renderApprovalKey(buildApproveKeyViewModel({})));
+		expect(svg).toContain("nothing waiting");
+		expect(svg).toContain('opacity="0.35"');
+	});
+
+	it("never draws a hold ring on Deny", () => {
+		const svg = decode(renderApprovalKey(buildDenyKeyViewModel({ request: request("high") })));
+		expect(svg).toContain("DENY");
+		expect(svg).not.toContain("stroke-dasharray");
 	});
 });

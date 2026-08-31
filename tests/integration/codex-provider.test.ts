@@ -4,7 +4,7 @@
  * push notifications (§7.3), sparse merge (§7.4), lifecycle and crash recovery
  * (§7.5), and turn interruption (design §12.2).
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -383,5 +383,209 @@ describe("models (design §19)", () => {
 		await expect(provider.getModels()).resolves.toEqual([
 			{ id: "gpt-5.1-codex", label: "GPT-5.1 Codex", reasoningLevels: ["medium"] },
 		]);
+	});
+});
+
+interface AnswerRecord {
+	method: string;
+	result?: { decision?: unknown };
+	error?: { code: number; message: string };
+}
+
+describe("approvals (design §12.4, §22.2)", () => {
+	const request = (method: string, params: Record<string, unknown>) => ({
+		delayMs: 10,
+		request: true,
+		method,
+		params,
+	});
+
+	/** The exact objects the plugin wrote back, as the server saw them. */
+	function answerLog(path: string): AnswerRecord[] {
+		if (!existsSync(path)) {
+			return [];
+		}
+		return readFileSync(path, "utf8")
+			.split("\n")
+			.filter((line) => line.trim().length > 0)
+			.map((line) => JSON.parse(line) as AnswerRecord);
+	}
+
+	function approvalHarness(script: unknown[]): {
+		provider: CodexProvider;
+		events: ProviderEvent[];
+		log: () => AnswerRecord[];
+	} {
+		const logPath = join(mkdtempSync(join(tmpdir(), "agentdeck-approval-")), "answers.jsonl");
+		const provider = createProvider({ FAKE_SCRIPT: JSON.stringify(script), FAKE_ANSWER_LOG: logPath });
+		const events: ProviderEvent[] = [];
+		provider.subscribe((event) => events.push(event));
+		return { provider, events, log: () => answerLog(logPath) };
+	}
+
+	const pendingId = (events: ProviderEvent[]): string => {
+		const found = events.flatMap((event) => (event.type === "approval-requested" ? [event.request.id] : []));
+		expect(found.length).toBeGreaterThan(0);
+		return found[0] as string;
+	};
+
+	it("raises a command approval as a domain request and answers only when told", async () => {
+		const { provider, events, log } = approvalHarness([
+			request("item/commandExecution/requestApproval", {
+				threadId: "thr_1",
+				turnId: "turn_1",
+				itemId: "item_1",
+				startedAtMs: 1,
+				command: "npm run build",
+				cwd: "/work/game",
+			}),
+		]);
+
+		await provider.start();
+		await waitFor(() => events.some((event) => event.type === "approval-requested"));
+
+		expect(events.find((event) => event.type === "approval-requested")).toMatchObject({
+			request: { sessionId: "thr_1", type: "command", title: "npm run build", risk: "low" },
+		});
+		// Nothing has been answered: an approval waits for a person, with no
+		// timeout and no default (instructions §2.5).
+		expect(events.some((event) => event.type === "approval-resolved")).toBe(false);
+		expect(log()).toEqual([]);
+	});
+
+	it("sends `accept` — and nothing broader — when the user approves once", async () => {
+		const { provider, events, log } = approvalHarness([
+			request("item/commandExecution/requestApproval", {
+				threadId: "thr_1",
+				turnId: "t",
+				itemId: "i",
+				startedAtMs: 1,
+				command: "ls",
+			}),
+		]);
+		await provider.start();
+		await waitFor(() => events.some((event) => event.type === "approval-requested"));
+
+		await provider.resolveApproval(pendingId(events), "approve-once");
+		await waitFor(() => log().length > 0);
+
+		expect(log()[0]?.result).toEqual({ decision: "accept" });
+	});
+
+	it("sends `decline` when the user denies", async () => {
+		const { provider, events, log } = approvalHarness([
+			request("item/fileChange/requestApproval", {
+				threadId: "thr_1",
+				turnId: "t",
+				itemId: "i",
+				startedAtMs: 1,
+				reason: "write outside the workspace",
+			}),
+		]);
+		await provider.start();
+		await waitFor(() => events.some((event) => event.type === "approval-requested"));
+
+		// A file change that names no paths cannot be judged from the deck, so it
+		// is high risk and the key will require a hold.
+		expect(events.find((event) => event.type === "approval-requested")).toMatchObject({
+			request: { type: "file-change", risk: "high" },
+		});
+
+		await provider.resolveApproval(pendingId(events), "deny");
+		await waitFor(() => log().length > 0);
+
+		expect(log()[0]?.result).toEqual({ decision: "decline" });
+	});
+
+	it("answers the legacy surface in its own dialect", async () => {
+		const { provider, events, log } = approvalHarness([
+			request("execCommandApproval", {
+				conversationId: "thr_1",
+				callId: "call_1",
+				command: ["rm", "-rf", "build"],
+				cwd: "/work/game",
+			}),
+		]);
+		await provider.start();
+		await waitFor(() => events.some((event) => event.type === "approval-requested"));
+
+		expect(events.find((event) => event.type === "approval-requested")).toMatchObject({
+			request: { type: "command", title: "rm -rf build", risk: "high" },
+		});
+
+		await provider.resolveApproval(pendingId(events), "deny");
+		await waitFor(() => log().length > 0);
+
+		expect(log()[0]?.result).toEqual({ decision: { denied: { rejection: "Denied from AgentDeck" } } });
+	});
+
+	it("marks the session as waiting for approval, and back to working once answered", async () => {
+		const { provider, events } = approvalHarness([
+			request("item/commandExecution/requestApproval", {
+				threadId: "thr_1",
+				turnId: "t",
+				itemId: "i",
+				startedAtMs: 1,
+				command: "ls",
+			}),
+		]);
+		await provider.start();
+		await waitFor(() => provider.sessions.some((session) => session.state === "waiting-approval"));
+
+		await provider.resolveApproval(pendingId(events), "approve-once");
+
+		expect(provider.sessions[0]?.state).toBe("working");
+		expect(events.some((event) => event.type === "approval-resolved")).toBe(true);
+	});
+
+	it("denies whatever is still waiting when the provider stops", async () => {
+		const { provider, events, log } = approvalHarness([
+			request("item/commandExecution/requestApproval", {
+				threadId: "thr_1",
+				turnId: "t",
+				itemId: "i",
+				startedAtMs: 1,
+				command: "ls",
+			}),
+		]);
+		await provider.start();
+		await waitFor(() => events.some((event) => event.type === "approval-requested"));
+
+		await provider.stop();
+		await waitFor(() => log().length > 0);
+
+		expect(log()[0]?.result).toEqual({ decision: "decline" });
+	});
+
+	it("refuses a server request that is not an approval", async () => {
+		const { provider, log } = approvalHarness([
+			request("item/tool/call", { threadId: "thr_1", turnId: "t", callId: "c", tool: "x", arguments: {} }),
+		]);
+		await provider.start();
+		await waitFor(() => log().length > 0);
+
+		expect(log()[0]?.result).toBeUndefined();
+		expect(log()[0]?.error).toBeDefined();
+	});
+});
+
+describe("model selection (design §19)", () => {
+	it("applies the model and effort with thread/settings/update", async () => {
+		const logPath = join(mkdtempSync(join(tmpdir(), "agentdeck-model-")), "answers.jsonl");
+		const provider = createProvider({ FAKE_ANSWER_LOG: logPath });
+		await provider.start();
+		await waitFor(() => provider.sessions.length > 0);
+
+		await provider.applyModel("thr_1", { modelId: "gpt-5.1-codex", reasoningLevel: "high" });
+
+		const entries = readFileSync(logPath, "utf8")
+			.split("\n")
+			.filter((line) => line.trim().length > 0)
+			.map((line) => JSON.parse(line) as { method: string; params: Record<string, unknown> });
+		expect(entries[0]).toEqual({
+			method: "thread/settings/update",
+			params: { threadId: "thr_1", model: "gpt-5.1-codex", effort: "high" },
+		});
+		expect(provider.sessions[0]).toMatchObject({ modelId: "gpt-5.1-codex", reasoningLevel: "high" });
 	});
 });

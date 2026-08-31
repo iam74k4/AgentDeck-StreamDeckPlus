@@ -11,11 +11,16 @@
  *   FAKE_THREADS      JSON for the `thread/list` result
  *   FAKE_SCRIPT       JSON array of { delayMs, method, params } notifications to
  *                     emit after `initialized`; an entry with `exit` terminates
- *                     the process instead, simulating a crash
+ *                     the process instead, simulating a crash, and an entry with
+ *                     `request: true` is sent as a server→client request whose
+ *                     answer is echoed back as a `test/answered` notification
+ *   FAKE_ANSWER_LOG   file to append the client's answers to, one JSON object per
+ *                     line, so a test can assert the exact bytes that were sent
  *   FAKE_FAIL         comma-separated method names that should answer with an error
  *   FAKE_NO_INIT_REPLY  set to skip the `initialize` response entirely
  */
 
+import { appendFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 
 const parseEnv = (name, fallback) => {
@@ -49,6 +54,9 @@ const failing = new Set((process.env.FAKE_FAIL ?? "").split(",").filter((entry) 
 
 let initialized = false;
 const interrupts = [];
+let nextServerRequestId = 1000;
+/** Server→client requests still waiting for the client's response. */
+const outstanding = new Map();
 
 function write(message) {
 	process.stdout.write(`${JSON.stringify(message)}\n`);
@@ -66,6 +74,12 @@ function runScript() {
 			if (step.exit !== undefined) {
 				process.exit(step.exit);
 			}
+			if (step.request === true) {
+				const id = nextServerRequestId++;
+				outstanding.set(id, step.method);
+				write({ id, method: step.method, params: step.params });
+				return;
+			}
 			notify(step.method, step.params);
 		}, elapsed);
 	}
@@ -73,6 +87,19 @@ function runScript() {
 
 function handle(message) {
 	const { id, method, params } = message;
+
+	// A response to one of our own server→client requests. Echoing it back lets a
+	// test assert the exact value the plugin put on the wire.
+	if (method === undefined && id !== undefined && outstanding.has(id)) {
+		const requestMethod = outstanding.get(id);
+		outstanding.delete(id);
+		const record = { method: requestMethod, result: message.result, error: message.error };
+		if (process.env.FAKE_ANSWER_LOG !== undefined) {
+			appendFileSync(process.env.FAKE_ANSWER_LOG, `${JSON.stringify(record)}\n`);
+		}
+		notify("test/answered", record);
+		return;
+	}
 
 	if (method === "initialized") {
 		initialized = true;
@@ -140,6 +167,12 @@ function handle(message) {
 				threadId: params?.threadId,
 				turn: { id: params?.turnId, status: "interrupted" },
 			});
+			return;
+		case "thread/settings/update":
+			if (process.env.FAKE_ANSWER_LOG !== undefined) {
+				appendFileSync(process.env.FAKE_ANSWER_LOG, `${JSON.stringify({ method, params })}\n`);
+			}
+			write({ id, result: {} });
 			return;
 		case "model/list":
 			write({

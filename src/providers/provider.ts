@@ -5,7 +5,8 @@
  * adding one must not require editing a union type anywhere else.
  */
 
-import type { ModelDescriptor } from "../domain/model.js";
+import type { ApprovalDecision } from "../domain/approval.js";
+import type { ModelDescriptor, ModelSelection } from "../domain/model.js";
 import type { ProviderEventListener, Unsubscribe } from "../domain/provider-events.js";
 import type { AgentSession } from "../domain/session.js";
 import type { ProviderId, UsageSnapshot } from "../domain/usage.js";
@@ -32,6 +33,22 @@ export interface AgentProvider {
 	interrupt?(sessionId: string): Promise<void>;
 	steer?(sessionId: string, text: string): Promise<void>;
 	getModels?(): Promise<ModelDescriptor[]>;
+
+	/**
+	 * Applies a model / reasoning choice to a session (design §19).
+	 *
+	 * Absent when the provider has no control channel, which is how the selector
+	 * knows to render itself disabled rather than failing on press.
+	 */
+	applyModel?(sessionId: string, selection: ModelSelection): Promise<void>;
+
+	/**
+	 * Answers a request this provider raised (design §12.4).
+	 *
+	 * The decision type has two values and no third; a provider cannot be asked
+	 * for a session-wide or persisted approval because no such value exists.
+	 */
+	resolveApproval?(approvalId: string, decision: ApprovalDecision): Promise<void>;
 
 	subscribe(listener: ProviderEventListener): Unsubscribe;
 }

@@ -27,6 +27,7 @@ export const CodexMethod = {
 	ThreadRead: "thread/read",
 	TurnInterrupt: "turn/interrupt",
 	ModelList: "model/list",
+	ThreadSettingsUpdate: "thread/settings/update",
 } as const;
 
 /** Notifications this plugin subscribes to (design §9.3, §20.1). */
@@ -153,4 +154,17 @@ export interface WireModel {
 
 export interface WireModelListResponse {
 	data?: WireModel[] | null;
+}
+
+/**
+ * `ThreadSettingsUpdateParams` — only the two fields the selector sets.
+ *
+ * The real type also carries approval policy, sandbox policy and permission
+ * profile overrides. They are deliberately absent: sending one would let the
+ * deck loosen Codex's own safety settings, which design §22.2 does not allow.
+ */
+export interface WireThreadSettingsUpdateParams {
+	threadId: string;
+	model?: string;
+	effort?: string;
 }

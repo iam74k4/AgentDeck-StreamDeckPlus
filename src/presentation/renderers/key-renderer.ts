@@ -7,6 +7,7 @@
  */
 
 import type { AgentStatusViewModel } from "../view-models/agent-status.js";
+import type { ApprovalKeyViewModel } from "../view-models/approval.js";
 import type { GitViewModel } from "../view-models/git.js";
 import type { ProjectViewModel } from "../view-models/project.js";
 import type { UsageViewModel } from "../view-models/usage.js";
@@ -68,8 +69,23 @@ function text(
  * per-character estimate is enough to lay out a dot beside a label without the
  * two colliding.
  */
-function estimateWidth(value: string, size: number): number {
+export function estimateWidth(value: string, size: number): number {
 	return value.length * size * 0.66;
+}
+
+/**
+ * Largest font size at which `value` still fits inside `maxWidth`.
+ *
+ * Overflow is not merely ugly here: a label drawn in the background colour on a
+ * filled plate simply loses whatever hangs over the edge, which is how "APPROVE"
+ * once rendered as "PPROV".
+ */
+export function fitFontSize(value: string, maxWidth: number, maxSize: number, minSize: number): number {
+	let size = maxSize;
+	while (size > minSize && estimateWidth(value, size) > maxWidth) {
+		size -= 1;
+	}
+	return size;
 }
 
 /**
@@ -85,10 +101,7 @@ export function renderAgentStatusKey(vm: AgentStatusViewModel): string {
 	const gap = 9;
 	const available = SIZE - 24;
 
-	let size = 22;
-	while (size > 13 && dotRadius * 2 + gap + estimateWidth(label, size) > available) {
-		size -= 1;
-	}
+	const size = fitFontSize(label, available - (dotRadius * 2 + gap), 22, 13);
 
 	const unitWidth = dotRadius * 2 + gap + estimateWidth(label, size);
 	const left = (SIZE - unitWidth) / 2;
@@ -173,4 +186,48 @@ export function renderLauncherKey(vm: { name: string; detail: string; installed:
 		parts.push(text(fit(vm.detail, 16), 100, 16, Palette.textMuted, "400"));
 	}
 	return svgToDataUri(frame(parts.join(""), { dimmed: !vm.installed }));
+}
+
+/**
+ * Design §12.4 — the Approve / Deny pair.
+ *
+ * A high-risk request draws the hold ring, and the ring fills as the key is held
+ * so that "nothing happened" and "still holding" cannot be confused. Deny uses
+ * the same renderer with no ring, since it is always a single press (§22.2).
+ */
+export function renderApprovalKey(vm: ApprovalKeyViewModel): string {
+	const parts: string[] = [];
+
+	if (vm.requiresHold) {
+		const radius = 34;
+		const circumference = 2 * Math.PI * radius;
+		const filled = round(circumference * vm.holdProgress);
+		parts.push(
+			`<circle cx="${SIZE / 2}" cy="60" r="${radius}" fill="none" stroke="${Palette.surface}" stroke-width="7"/>`,
+		);
+		if (vm.holdProgress > 0) {
+			parts.push(
+				`<circle cx="${SIZE / 2}" cy="60" r="${radius}" fill="none" stroke="${vm.color}" stroke-width="7"` +
+					` stroke-linecap="round" stroke-dasharray="${round(circumference)}"` +
+					` stroke-dashoffset="${round(circumference - filled)}"` +
+					` transform="rotate(-90 ${SIZE / 2} 60)"/>`,
+			);
+		}
+		// Inside the ring, so the label is sized to clear the stroke rather than
+		// sitting on top of it.
+		parts.push(text(fit(vm.label, 7), 68, 20, vm.active ? Palette.text : Palette.textMuted, "700"));
+	} else {
+		// The label is drawn in the background colour on a filled plate, so anything
+		// that overflows the plate disappears rather than merely looking cramped:
+		// "APPROVE" at a fixed 24px rendered as "PPROV". It is shrunk to fit.
+		const plateWidth = 104;
+		const plateX = (SIZE - plateWidth) / 2;
+		const label = fit(vm.label, 9);
+		const size = fitFontSize(label, plateWidth - 14, 24, 13);
+		parts.push(`<rect x="${plateX}" y="34" width="${plateWidth}" height="52" rx="12" fill="${vm.color}"/>`);
+		parts.push(text(label, 68, size, Palette.background, "700"));
+	}
+
+	parts.push(text(fit(vm.detail, 16), 118, 16, Palette.textMuted, "400"));
+	return svgToDataUri(frame(parts.join(""), { dimmed: !vm.active }));
 }

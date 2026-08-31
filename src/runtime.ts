@@ -6,7 +6,9 @@
  * `application/` ever names a concrete implementation.
  */
 
+import { ApprovalService } from "./application/approval-service.js";
 import { GitService } from "./application/git-service.js";
+import { ModelService } from "./application/model-service.js";
 import type { Unsubscribe } from "./domain/provider-events.js";
 import { ProjectService, type PathStat, type ProjectStore } from "./application/project-service.js";
 import { ProviderRegistry } from "./application/provider-registry.js";
@@ -44,6 +46,8 @@ export interface AgentDeckRuntime {
 	readonly sessions: SessionService;
 	readonly git: GitService;
 	readonly projects: ProjectService;
+	readonly approvals: ApprovalService;
+	readonly models: ModelService;
 	readonly launchers: LauncherRegistry;
 	readonly ui: UiCoordinator;
 	readonly dashboard: PlusDashboardCoordinator;
@@ -94,8 +98,10 @@ export function createRuntime(options: RuntimeOptions): AgentDeckRuntime {
 		...(options.projectStat === undefined ? {} : { stat: options.projectStat }),
 	});
 	const launchers = new LauncherRegistry({ logger });
+	const approvals = new ApprovalService(registry, { logger });
+	const models = new ModelService(registry, sessions, { logger });
 
-	const ui = new UiCoordinator({ registry, usage, sessions, git, projects }, { logger });
+	const ui = new UiCoordinator({ registry, usage, sessions, git, projects, approvals, models }, { logger });
 
 	// The elapsed-time tick exists for the touch strip; with no encoder placed,
 	// nothing here should keep a 1 Hz timer alive (design §20.2).
@@ -148,7 +154,7 @@ export function createRuntime(options: RuntimeOptions): AgentDeckRuntime {
 
 	// Keep the touch strip in step with every concern the dashboard shows. `tick`
 	// is deliberately absent: it is subscribed only while an encoder is placed.
-	for (const concern of ["usage", "session", "git", "project", "provider"] as const) {
+	for (const concern of ["usage", "session", "git", "project", "provider", "model"] as const) {
 		ui.subscribe(concern, refreshDashboard);
 	}
 
@@ -159,6 +165,8 @@ export function createRuntime(options: RuntimeOptions): AgentDeckRuntime {
 		sessions,
 		git,
 		projects,
+		approvals,
+		models,
 		launchers,
 		ui,
 		dashboard,
@@ -194,6 +202,8 @@ export function createRuntime(options: RuntimeOptions): AgentDeckRuntime {
 			releaseTick = undefined;
 			ui.dispose();
 			projects.dispose();
+			models.dispose();
+			approvals.dispose();
 			git.dispose();
 			sessions.dispose();
 			usage.dispose();

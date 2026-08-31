@@ -6,10 +6,19 @@
  * (design §27 "Provider障害でPlugin全体を停止しない").
  */
 
-import type { ProviderEvent, ProviderEventListener, Unsubscribe } from "../domain/provider-events.js";
+import type { ProviderEvent, Unsubscribe } from "../domain/provider-events.js";
 import type { ProviderId } from "../domain/usage.js";
 import type { AgentProvider } from "../providers/provider.js";
 import type { Logger } from "../infrastructure/logger.js";
+
+/**
+ * Registry listeners are told which provider raised the event.
+ *
+ * A provider's own listener does not need it — it knows — but a consumer of the
+ * whole registry does: session ids and approval ids are only unique per
+ * provider, so acting on one by id alone can act on another provider's.
+ */
+export type RegistryEventListener = (event: ProviderEvent, providerId: ProviderId) => void;
 
 export interface ProviderStartResult {
 	providerId: ProviderId;
@@ -19,7 +28,7 @@ export interface ProviderStartResult {
 
 export class ProviderRegistry {
 	readonly #providers = new Map<ProviderId, AgentProvider>();
-	readonly #listeners = new Set<ProviderEventListener>();
+	readonly #listeners = new Set<RegistryEventListener>();
 	readonly #unsubscribes = new Map<ProviderId, Unsubscribe>();
 	readonly #logger: Logger | undefined;
 
@@ -34,7 +43,7 @@ export class ProviderRegistry {
 		this.#providers.set(provider.id, provider);
 		this.#unsubscribes.set(
 			provider.id,
-			provider.subscribe((event) => this.#fanOut(event)),
+			provider.subscribe((event) => this.#fanOut(event, provider.id)),
 		);
 		this.#logger?.info(`registered provider ${provider.id}`);
 	}
@@ -52,7 +61,7 @@ export class ProviderRegistry {
 	}
 
 	/** Subscribes to every provider's events. */
-	public subscribe(listener: ProviderEventListener): Unsubscribe {
+	public subscribe(listener: RegistryEventListener): Unsubscribe {
 		this.#listeners.add(listener);
 		return () => this.#listeners.delete(listener);
 	}
@@ -88,10 +97,10 @@ export class ProviderRegistry {
 		this.#listeners.clear();
 	}
 
-	#fanOut(event: ProviderEvent): void {
+	#fanOut(event: ProviderEvent, providerId: ProviderId): void {
 		for (const listener of this.#listeners) {
 			try {
-				listener(event);
+				listener(event, providerId);
 			} catch (error) {
 				this.#logger?.warn("registry listener failed", error);
 			}

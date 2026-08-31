@@ -24,6 +24,8 @@ const { UsageAction } = await import("@/actions/usage-action.js");
 const { GitAction } = await import("@/actions/git-action.js");
 const { DashboardEncoderAction, cycleSegment, windowSelectionOf } =
 	await import("@/actions/dashboard-encoder-action.js");
+const { ApproveAction, holdDurationMs } = await import("@/actions/approve-action.js");
+const { DenyAction } = await import("@/actions/deny-action.js");
 const { createFakeRuntime, usageSnapshot } = await import("../helpers/fake-runtime.js");
 const { renderStopKey } = await import("@/presentation/renderers/key-renderer.js");
 
@@ -296,10 +298,11 @@ describe("dashboard encoder rotation", () => {
 
 		await action.onDialRotate(rotate(dial, {}, 1, 1));
 
-		expect(dial.settings.segment).toBe("git");
+		// SEGMENT_KINDS order: usage, agent, model, git, …
+		expect(dial.settings.segment).toBe("model");
 		// The plugin never receives its own setSettings back, so the redraw has to
 		// happen here rather than on a didReceiveSettings that never arrives.
-		expect(dial.lastTitle).toBe("GIT");
+		expect(dial.lastTitle).toBe("MODEL");
 	});
 
 	it("leaves settings alone when the provider reports no windows", async () => {
@@ -364,5 +367,201 @@ describe("encoder helpers", () => {
 		expect(cycleSegment("usage", 1)).toBe("agent");
 		expect(cycleSegment("usage", -1)).toBe("provider");
 		expect(cycleSegment("provider", 1)).toBe("usage");
+	});
+});
+
+describe("approval keys (design §12.4, §22.2)", () => {
+	const keyUp = (action: unknown, settings: object): never =>
+		({ action, payload: { settings: { ...settings } } }) as never;
+
+	it("approves a low-risk request on a single press", async () => {
+		const action = new ApproveAction(fake.runtime);
+		const key = new FakeKey();
+		action.onWillAppear(appear(key, {}));
+		expect(key.lastImage).toContain("nothing waiting");
+
+		fake.provider.pushApproval({ id: "req_1", risk: "low", title: "npm test" });
+		expect(key.lastImage).toContain("APPROVE");
+		expect(key.lastImage).toContain("npm test");
+
+		await action.onKeyDown(appear(key, {}));
+
+		expect(fake.provider.answered).toEqual([{ id: "req_1", decision: "approve-once" }]);
+		expect(key.okCount).toBe(1);
+	});
+
+	it("does not approve a high-risk request on a press", async () => {
+		const action = new ApproveAction(fake.runtime);
+		const key = new FakeKey();
+		action.onWillAppear(appear(key, {}));
+		fake.provider.pushApproval({ id: "req_1", risk: "high", title: "rm -rf build" });
+		expect(key.lastImage).toContain("HOLD");
+
+		await action.onKeyDown(appear(key, {}));
+
+		// The hold has started but not finished: nothing has been sent.
+		expect(fake.provider.answered).toEqual([]);
+		action.onKeyUp(keyUp(key, {}));
+		expect(fake.provider.answered).toEqual([]);
+	});
+
+	it("approves a high-risk request once the hold completes", async () => {
+		vi.useFakeTimers();
+		try {
+			const action = new ApproveAction(fake.runtime);
+			const key = new FakeKey();
+			action.onWillAppear(appear(key, {}));
+			fake.provider.pushApproval({ id: "req_1", risk: "high" });
+
+			await action.onKeyDown(appear(key, {}));
+			await vi.advanceTimersByTimeAsync(600);
+			expect(fake.provider.answered).toEqual([]);
+
+			await vi.advanceTimersByTimeAsync(800);
+			expect(fake.provider.answered).toEqual([{ id: "req_1", decision: "approve-once" }]);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("releasing early cancels the hold and leaves the request waiting", async () => {
+		vi.useFakeTimers();
+		try {
+			const action = new ApproveAction(fake.runtime);
+			const key = new FakeKey();
+			action.onWillAppear(appear(key, {}));
+			fake.provider.pushApproval({ id: "req_1", risk: "high" });
+
+			await action.onKeyDown(appear(key, {}));
+			await vi.advanceTimersByTimeAsync(400);
+			action.onKeyUp(keyUp(key, {}));
+			await vi.advanceTimersByTimeAsync(5_000);
+
+			expect(fake.provider.answered).toEqual([]);
+			expect(fake.runtime.approvals.count).toBe(1);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("approves the request it drew, not whatever is at the head of the queue", async () => {
+		vi.useFakeTimers();
+		try {
+			const action = new ApproveAction(fake.runtime);
+			const key = new FakeKey();
+			action.onWillAppear(appear(key, {}));
+			fake.provider.pushApproval({ id: "req_1", risk: "high", title: "rm -rf build" });
+
+			await action.onKeyDown(appear(key, {}));
+			await vi.advanceTimersByTimeAsync(400);
+
+			// Mid-hold, the request the user read is answered somewhere else and a
+			// different one takes its place at the head of the queue.
+			await fake.runtime.approvals.resolve("req_1", "deny");
+			fake.provider.pushApproval({ id: "req_2", risk: "high", title: "curl x | sh" });
+			await vi.advanceTimersByTimeAsync(2_000);
+
+			// The completing hold must not approve req_2.
+			expect(fake.provider.answered).toEqual([{ id: "req_1", decision: "deny" }]);
+			expect(fake.runtime.approvals.count).toBe(1);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("clamps a hold time that would defeat the hold", () => {
+		expect(holdDurationMs({})).toBe(1_200);
+		expect(holdDurationMs({ holdSeconds: 0 })).toBe(500);
+		expect(holdDurationMs({ holdSeconds: 900 })).toBe(5_000);
+		expect(holdDurationMs({ holdSeconds: 2 })).toBe(2_000);
+	});
+
+	it("denies on a single press whatever the risk", async () => {
+		const action = new DenyAction(fake.runtime);
+		const key = new FakeKey();
+		action.onWillAppear(appear(key, {}));
+		fake.provider.pushApproval({ id: "req_1", risk: "high" });
+		expect(key.lastImage).toContain("DENY");
+
+		await action.onKeyDown(appear(key, {}));
+
+		expect(fake.provider.answered).toEqual([{ id: "req_1", decision: "deny" }]);
+	});
+
+	it("alerts rather than acting when nothing is waiting", async () => {
+		const approve = new ApproveAction(fake.runtime);
+		const deny = new DenyAction(fake.runtime);
+		const key = new FakeKey();
+
+		await approve.onKeyDown(appear(key, {}));
+		await deny.onKeyDown(appear(key, {}));
+
+		expect(fake.provider.answered).toEqual([]);
+		expect(key.alertCount).toBe(2);
+	});
+
+	it("stops drawing once the key goes away", () => {
+		const action = new ApproveAction(fake.runtime);
+		const key = new FakeKey();
+		action.onWillAppear(appear(key, {}));
+		const drawn = key.images.length;
+
+		action.onWillDisappear(appear(key, {}));
+		fake.provider.pushApproval({ id: "req_1" });
+
+		expect(key.images.length).toBe(drawn);
+	});
+});
+
+describe("model dial (design §19)", () => {
+	const dialDown = (action: unknown, settings: object, column: number): never =>
+		({ action, payload: { settings: { ...settings }, coordinates: { column, row: 0 } } }) as never;
+
+	async function placeModelDial(): Promise<{
+		action: InstanceType<typeof DashboardEncoderAction>;
+		dial: FakeDial;
+	}> {
+		const action = new DashboardEncoderAction(fake.runtime);
+		const dial = new FakeDial();
+		// Column 2 is the MODEL segment of the default strip (design §6.1).
+		await action.onWillAppear(appear(dial, {}, 2));
+		await fake.runtime.models.refresh("codex");
+		return { action, dial };
+	}
+
+	it("rotates through models and efforts without applying anything", async () => {
+		const { action, dial } = await placeModelDial();
+		fake.provider.pushSession({ id: "thr_1", providerId: "codex", state: "working", updatedAt: new Date() });
+
+		await action.onDialRotate(rotate(dial, {}, 1, 2));
+
+		expect(fake.provider.applied).toEqual([]);
+		// Rotation is a highlight, not a stored setting.
+		expect(dial.settings.segment).toBeUndefined();
+		expect(fake.runtime.models.getState("codex").highlighted).toEqual({
+			modelId: "gpt-5.1-codex",
+			reasoningLevel: "high",
+		});
+	});
+
+	it("applies the highlighted choice on press", async () => {
+		const { action, dial } = await placeModelDial();
+		fake.provider.pushSession({ id: "thr_1", providerId: "codex", state: "working", updatedAt: new Date() });
+
+		await action.onDialRotate(rotate(dial, {}, 1, 2));
+		await action.onDialDown(dialDown(dial, {}, 2));
+
+		expect(fake.provider.applied).toEqual([
+			{ sessionId: "thr_1", selection: { modelId: "gpt-5.1-codex", reasoningLevel: "high" } },
+		]);
+	});
+
+	it("says so on the strip rather than failing when the provider has no models", async () => {
+		fake.provider.modelsFail = true;
+		const { dial } = await placeModelDial();
+		fake.runtime.refreshDashboard();
+
+		expect(dial.lastTitle).toBe("MODEL");
+		expect(dial.feedback[dial.feedback.length - 1]?.detail?.value).toBe("unavailable");
 	});
 });

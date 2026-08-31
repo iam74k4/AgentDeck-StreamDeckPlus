@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<title>Approve Once</title>
+		<link rel="stylesheet" href="lib/pi.css" />
+	</head>
+	<body>
+		<h1>Approve Once</h1>
+		<div class="row">
+			<label for="provider">Provider</label>
+			<select id="provider" data-setting="providerId">
+				<option value="">Any provider</option>
+				<option value="codex">Codex</option>
+			</select>
+		</div>
+		<div class="row">
+			<label for="hold">Hold time</label>
+			<input
+				id="hold"
+				type="number"
+				min="0.5"
+				max="5"
+				step="0.1"
+				placeholder="1.2"
+				data-setting="holdSeconds"
+			/>
+		</div>
+		<p class="hint">
+			Seconds a <strong>high-risk</strong> request must be held before it is approved. Low- and medium-risk
+			requests are approved on a single press. Clamped to 0.5–5 seconds.
+		</p>
+		<p class="hint">
+			This key only ever approves the one request on screen. There is no "always approve": the next request is
+			asked again.
+		</p>
+		<p class="hint">
+			Only Codex can raise approvals. Claude Code is monitored through its status line and has no approval
+			channel.
+		</p>
+		<script src="lib/pi.js"></script>
+	</body>
+</html>

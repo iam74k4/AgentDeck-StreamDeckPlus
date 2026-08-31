@@ -18,6 +18,7 @@ import {
 	type WireModelListResponse,
 	type WireThread,
 	type WireThreadListResponse,
+	type WireThreadSettingsUpdateParams,
 	type WireTurn,
 } from "./protocol.js";
 
@@ -107,6 +108,11 @@ export class AppServerClient {
 
 	public interruptTurn(threadId: string, turnId: string): Promise<unknown> {
 		return this.#call<unknown>(CodexMethod.TurnInterrupt, { threadId, turnId });
+	}
+
+	/** Design §19 — applies a model / reasoning choice to subsequent turns. */
+	public updateThreadSettings(params: WireThreadSettingsUpdateParams): Promise<unknown> {
+		return this.#call<unknown>(CodexMethod.ThreadSettingsUpdate, params);
 	}
 
 	public listModels(): Promise<WireModelListResponse> {

@@ -13,6 +13,7 @@
 				<option value="">Auto (by dial position)</option>
 				<option value="usage">Usage</option>
 				<option value="agent">Agent</option>
+				<option value="model">Model / Reasoning</option>
 				<option value="git">Git</option>
 				<option value="project">Project</option>
 				<option value="overview">AI Overview</option>
@@ -20,6 +21,10 @@
 			</select>
 		</div>
 		<p class="hint">With all four dials assigned, position decides the segment and this is ignored.</p>
+		<p class="hint">
+			On a Model segment, rotating moves through the provider's models and reasoning levels and pressing
+			applies the highlighted one. Rotating alone changes nothing.
+		</p>
 		<div class="row">
 			<label for="provider">Provider</label>
 			<select id="provider" data-setting="providerId">

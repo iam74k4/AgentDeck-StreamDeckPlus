@@ -45,13 +45,21 @@ let runtime: AgentDeckRuntime | undefined;
 /** A stand-in for one 200x100 encoder region. */
 class FakeEncoder implements EncoderContext {
 	public last: SegmentFeedback | undefined;
-	public constructor(public readonly id: string) {}
+	public constructor(
+		public readonly id: string,
+		public readonly preferredSegment?: EncoderContext["preferredSegment"],
+	) {}
 	public setFeedback(feedback: SegmentFeedback): void {
 		this.last = feedback;
 	}
 }
 
-function makeRuntime(env: NodeJS.ProcessEnv = {}): { runtime: AgentDeckRuntime; encoders: FakeEncoder[] } {
+function makeRuntime(env: NodeJS.ProcessEnv = {}): {
+	runtime: AgentDeckRuntime;
+	encoders: FakeEncoder[];
+	/** A lone encoder on a second device, in Standalone Segment Mode. */
+	gitEncoder: FakeEncoder;
+} {
 	const created = createRuntime({
 		logger: createLogger({ sink: nullSink }),
 		projectStore: memoryProjectStore(),
@@ -72,9 +80,14 @@ function makeRuntime(env: NodeJS.ProcessEnv = {}): { runtime: AgentDeckRuntime; 
 		encoders.push(encoder);
 		created.dashboard.register("device-1", column as Column, encoder);
 	}
+	// Git is not on the design's default strip (§6.1 puts MODEL in column 2), so
+	// it is exercised the way a user would reach it: a standalone segment.
+	const gitEncoder = new FakeEncoder("enc-git", "git");
+	created.dashboard.register("device-2", 0, gitEncoder);
+
 	created.setDashboardContext({ repositoryPath: repo });
 	runtime = created;
-	return { runtime: created, encoders };
+	return { runtime: created, encoders, gitEncoder };
 }
 
 beforeAll(() => {
@@ -105,14 +118,14 @@ afterAll(() => {
 });
 
 describe("technical spike acceptance", () => {
-	it("shows Codex usage, agent status, git and provider health across the touch strip", async () => {
-		const { runtime: rt, encoders } = makeRuntime();
+	it("shows Codex usage, agent status, model and project across the touch strip", async () => {
+		const { runtime: rt, encoders, gitEncoder } = makeRuntime();
 		await rt.start();
 		await rt.projects.add({ path: repo, name: "agentdeck-demo" });
 		rt.git.watch(repo);
 
 		await waitFor(() => encoders[0]?.last?.value.value === "96%" || encoders[0]?.last?.value.value === "41%");
-		await waitFor(() => encoders[2]?.last?.value.value === "main");
+		await waitFor(() => gitEncoder.last?.value.value === "main");
 
 		expect(encoders[0]?.last?.title.value).toBe("CODEX");
 		// Auto mode surfaces the most constrained window: 41% over 5h vs 12% over 7d.
@@ -123,8 +136,12 @@ describe("technical spike acceptance", () => {
 		expect(encoders[1]?.last?.title.value).toBe("AGENT");
 		expect(encoders[1]?.last?.value.value).toBe("IDLE");
 
-		expect(encoders[2]?.last?.title.value).toBe("GIT");
-		expect(encoders[2]?.last?.detail.value).toContain("U:1");
+		// Column 2 is MODEL (design §6.1). Nothing has been rotated, so it reports
+		// what the provider is running rather than an unapplied choice.
+		expect(encoders[2]?.last?.title.value).toBe("MODEL");
+
+		expect(gitEncoder.last?.title.value).toBe("GIT");
+		expect(gitEncoder.last?.detail.value).toContain("U:1");
 
 		// Column 3 is PROJECT (design §6.1, instructions §8.2). The AI Overview is
 		// still reachable, one Segment setting away.
@@ -133,7 +150,7 @@ describe("technical spike acceptance", () => {
 	});
 
 	it("follows the active project for git, and switches between projects", async () => {
-		const { runtime: rt, encoders } = makeRuntime();
+		const { runtime: rt, encoders, gitEncoder } = makeRuntime();
 		await rt.start();
 
 		const first = await rt.projects.add({ path: repo, name: "first" });
@@ -142,7 +159,7 @@ describe("technical spike acceptance", () => {
 
 		// The git segment watches whatever the active project points at — no
 		// per-action path setting involved.
-		await waitFor(() => encoders[2]?.last?.value.value === "main", {
+		await waitFor(() => gitEncoder.last?.value.value === "main", {
 			message: "git segment never followed the active project",
 		});
 		expect(encoders[3]?.last?.value.value).toBe("first");

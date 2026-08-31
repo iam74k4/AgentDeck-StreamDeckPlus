@@ -6,7 +6,10 @@
  * when all four columns belong to AgentDeck the coordinator drives them as one
  * dashboard, otherwise each falls back to Standalone Segment Mode.
  *
- * Dial 1 behaviour follows design §6.1: rotate switches the view, press refreshes.
+ * Dial behaviour follows design §6.1: rotate switches the view and press
+ * refreshes, except on the segments that have a meaning of their own — usage
+ * rotates through windows, and model rotates through models and efforts with the
+ * press applying the highlighted one (design §19).
  */
 
 import { action, SingletonAction } from "@elgato/streamdeck";
@@ -77,8 +80,15 @@ export class DashboardEncoderAction extends SingletonAction<DashboardEncoderSett
 		}
 	}
 
-	/** Press → manual refresh of everything this segment can show (design §6.1). */
+	/**
+	 * Press → apply on a model segment (design §19 "Press → Apply"), otherwise a
+	 * manual refresh of everything this segment can show (design §6.1).
+	 */
 	public override async onDialDown(ev: DialDownEvent<DashboardEncoderSettings>): Promise<void> {
+		if (ev.action.isDial() && this.#segmentOf(ev.action, ev.payload) === "model") {
+			await this.#applyModel(ev.payload.settings);
+			return;
+		}
 		await this.#refreshAll(ev.payload.settings);
 	}
 
@@ -109,6 +119,15 @@ export class DashboardEncoderAction extends SingletonAction<DashboardEncoderSett
 
 		const direction = ev.payload.ticks >= 0 ? 1 : -1;
 		const segment = this.#runtime.dashboard.segmentFor(ev.action.device.id, column);
+
+		// Design §19: rotating a model segment moves the highlight and nothing
+		// else. It is not persisted as a setting, because it is a choice about the
+		// session rather than about this key.
+		if (segment === "model") {
+			this.#runtime.models.rotate(settings.providerId ?? this.#runtime.defaultProviderId, direction);
+			return;
+		}
+
 		const next =
 			segment === "usage"
 				? this.#cycleUsageWindow(settings, direction)
@@ -157,7 +176,31 @@ export class DashboardEncoderAction extends SingletonAction<DashboardEncoderSett
 			this.#subscriptions.add(target.id, this.#runtime.git.watch(path));
 		}
 
+		// The model list is only fetched when a segment actually shows it; the
+		// service shares one in-flight request across encoders (design §17.2).
+		if (this.#runtime.dashboard.segmentFor(target.device.id, column) === "model") {
+			void this.#runtime.models.refresh(settings.providerId ?? this.#runtime.defaultProviderId);
+		}
+
 		this.#publishContext(settings);
+	}
+
+	/** The segment a dial event belongs to, resolved the same way a redraw does. */
+	#segmentOf(
+		target: DialTarget,
+		payload: { coordinates?: { column: number } } | object,
+	): SegmentKind | undefined {
+		const column = this.#columns.get(target.id) ?? encoderColumn(payload);
+		return isColumn(column) ? this.#runtime.dashboard.segmentFor(target.device.id, column) : undefined;
+	}
+
+	async #applyModel(settings: DashboardEncoderSettings): Promise<void> {
+		const providerId = settings.providerId ?? this.#runtime.defaultProviderId;
+		try {
+			await this.#runtime.models.apply(providerId);
+		} catch (error) {
+			this.#runtime.logger.warn("could not apply the selected model", error);
+		}
 	}
 
 	async #refreshAll(settings: DashboardEncoderSettings): Promise<void> {

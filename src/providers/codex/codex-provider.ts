@@ -10,7 +10,8 @@
  *                                  ↘ STOPPING → STOPPED
  */
 
-import type { ModelDescriptor } from "../../domain/model.js";
+import type { ApprovalDecision, ApprovalRequest } from "../../domain/approval.js";
+import type { ModelDescriptor, ModelSelection } from "../../domain/model.js";
 import type { ProviderEvent, ProviderEventListener, Unsubscribe } from "../../domain/provider-events.js";
 import type { AgentSession } from "../../domain/session.js";
 import { AgentDeckError, toAgentDeckError } from "../../domain/errors.js";
@@ -27,6 +28,7 @@ import {
 import { scheduleInterval, type ScheduledTask } from "../../infrastructure/scheduler.js";
 import type { AgentProvider, ProviderLifecycleState } from "../provider.js";
 import { AppServerClient } from "./app-server-client.js";
+import { parseApprovalRequest, toApprovalResponse } from "./approval-mapper.js";
 import { JsonRpcTransport } from "./json-rpc.js";
 import {
 	applyFullRateLimits,
@@ -93,6 +95,12 @@ export interface CodexProviderOptions {
 	clientVersion?: string;
 	/** Design §17.4 — Codex health check interval. */
 	healthCheckIntervalMs?: number;
+	/**
+	 * The project the agent is working in, used to judge whether an approval would
+	 * act outside it (design §22.2). Advisory only: it never widens what is
+	 * allowed, only what is flagged.
+	 */
+	projectPath?: string;
 	/** Per-request timeout for app-server calls (design §27). */
 	requestTimeoutMs?: number;
 	/** Timeout for the `initialize` handshake specifically. */
@@ -104,6 +112,14 @@ export interface CodexProviderOptions {
 	/** Set to false in tests to keep failures from rescheduling. */
 	autoRestart?: boolean;
 	backoff?: { initialDelayMs?: number; maxDelayMs?: number };
+}
+
+/** An approval Codex is waiting on, and the reply that unblocks it. */
+interface PendingApproval {
+	request: ApprovalRequest;
+	/** The method it arrived on decides the dialect of the answer. */
+	method: string;
+	answer: (decision: ApprovalDecision) => void;
 }
 
 interface Connection {
@@ -121,6 +137,7 @@ export class CodexProvider implements AgentProvider {
 	readonly #logger: Logger;
 	readonly #listeners = new Set<ProviderEventListener>();
 	readonly #sessions = new Map<string, AgentSession>();
+	readonly #approvals = new Map<string, PendingApproval>();
 	readonly #backoff: Backoff;
 	readonly #spawn: typeof spawnManagedProcess;
 	readonly #resolve: typeof resolveExecutable;
@@ -251,6 +268,8 @@ export class CodexProvider implements AgentProvider {
 
 		this.#setState("stopping");
 		this.#connection = undefined;
+		// Before the pipe goes away, not after (design §22.2: fail closed).
+		await this.#denyPendingApprovals();
 		connection.unsubscribe();
 		connection.transport.close(new AgentDeckError("INTERRUPTED", "Provider stopping."));
 		await connection.process.shutdown();
@@ -306,6 +325,45 @@ export class CodexProvider implements AgentProvider {
 		return (response.data ?? [])
 			.filter((model): model is NonNullable<typeof model> => model !== null && model !== undefined)
 			.map(wireModelToDescriptor);
+	}
+
+	/** Design §19 — applies the selector's choice to a session's later turns. */
+	public async applyModel(sessionId: string, selection: ModelSelection): Promise<void> {
+		const client = this.#requireClient();
+		await client.updateThreadSettings({
+			threadId: sessionId,
+			model: selection.modelId,
+			...(selection.reasoningLevel === undefined ? {} : { effort: selection.reasoningLevel }),
+		});
+		const existing = this.#sessions.get(sessionId);
+		if (existing !== undefined) {
+			const next: AgentSession = { ...existing, modelId: selection.modelId, updatedAt: new Date() };
+			if (selection.reasoningLevel === undefined) {
+				delete next.reasoningLevel;
+			} else {
+				next.reasoningLevel = selection.reasoningLevel;
+			}
+			this.#upsertSession(next, { emit: true });
+		}
+	}
+
+	/**
+	 * Design §12.4 — answers an approval Codex is waiting on.
+	 *
+	 * Answering an id that is no longer pending is not an error: the user pressing
+	 * Approve twice must not fail the second press, and by then Codex has already
+	 * had its answer.
+	 */
+	public async resolveApproval(approvalId: string, decision: ApprovalDecision): Promise<void> {
+		const pending = this.#approvals.get(approvalId);
+		if (pending === undefined) {
+			this.#logger.debug("approval was already answered");
+			return;
+		}
+		this.#approvals.delete(approvalId);
+		pending.answer(decision);
+		this.#emit({ type: "approval-resolved", approvalId });
+		this.#restoreSessionAfterApproval(pending.request.sessionId);
 	}
 
 	public get sessions(): AgentSession[] {
@@ -394,11 +452,20 @@ export class CodexProvider implements AgentProvider {
 				: { requestTimeoutMs: this.#options.requestTimeoutMs }),
 		});
 
-		// Approvals are v0.4 (instructions §5); until then every server→client
-		// request is declined rather than silently auto-approved (design §22.2).
-		transport.setRequestHandler((request) => {
-			this.#logger.info(`declining unsupported server request: ${request.method}`);
-			throw new AgentDeckError("PROTOCOL_ERROR", `Unsupported: ${request.method}`);
+		// Approval requests reach the user; anything else is refused rather than
+		// silently auto-answered (design §22.2). Note that neither branch can
+		// approve on its own — the only approval value is produced from a decision
+		// the user made on the deck.
+		transport.setRequestHandler(async (request) => {
+			const parsed = parseApprovalRequest(request.method, request.params, {
+				requestId: String(request.id),
+				...(this.#options.projectPath === undefined ? {} : { projectPath: this.#options.projectPath }),
+			});
+			if (parsed === undefined) {
+				this.#logger.info(`declining unsupported server request: ${request.method}`);
+				throw new AgentDeckError("PROTOCOL_ERROR", `Unsupported: ${request.method}`);
+			}
+			return this.#awaitApproval(request.method, parsed);
 		});
 
 		const client = new AppServerClient({
@@ -436,6 +503,9 @@ export class CodexProvider implements AgentProvider {
 			transport.close(failure);
 			this.#healthCheck?.stop();
 			this.#healthCheck = undefined;
+			// The process is gone, so there is nobody left to answer: drop the
+			// requests instead of pretending the deck can still act on them.
+			this.#discardPendingApprovals();
 			this.#markSessionsDisconnected();
 			if (!this.#stopping) {
 				this.#recordError(failure);
@@ -690,6 +760,81 @@ export class CodexProvider implements AgentProvider {
 			this.#logger.debug("thread/read failed while looking for an active turn", error);
 		}
 		return undefined;
+	}
+
+	/**
+	 * Parks an approval until the user answers it on the deck.
+	 *
+	 * Nothing here answers on its own: no timeout, no default. An approval Codex
+	 * is waiting on is a question for a person (instructions §2.5), and the only
+	 * ways out are {@link resolveApproval} and the provider stopping — which
+	 * denies rather than approves.
+	 */
+	#awaitApproval(method: string, request: ApprovalRequest): Promise<unknown> {
+		return new Promise<unknown>((resolve) => {
+			this.#approvals.set(request.id, {
+				request,
+				method,
+				answer: (decision) => resolve(toApprovalResponse(method, decision)),
+			});
+			this.#markSessionWaitingApproval(request.sessionId);
+			this.#emit({ type: "approval-requested", request });
+		});
+	}
+
+	/**
+	 * Denies everything still waiting, then forgets it.
+	 *
+	 * Called when the connection is going away. Failing closed is the only safe
+	 * direction, and a denial that arrives just before the pipe closes costs
+	 * nothing if Codex never reads it.
+	 */
+	async #denyPendingApprovals(): Promise<void> {
+		const pending = [...this.#approvals.values()];
+		this.#approvals.clear();
+		if (pending.length === 0) {
+			return;
+		}
+		for (const approval of pending) {
+			this.#logger.info("denying an approval left waiting by a disconnect");
+			approval.answer("deny");
+			this.#emit({ type: "approval-resolved", approvalId: approval.request.id });
+		}
+		// Answering only settles a promise; the bytes are written by the request
+		// handler's continuation a few microtasks later. Yielding a full turn of
+		// the loop lets them reach stdin before the caller closes it.
+		await new Promise<void>((resolve) => {
+			setImmediate(resolve);
+		});
+	}
+
+	/** Forgets everything waiting, without answering: the reader is gone. */
+	#discardPendingApprovals(): void {
+		const pending = [...this.#approvals.values()];
+		this.#approvals.clear();
+		for (const approval of pending) {
+			this.#emit({ type: "approval-resolved", approvalId: approval.request.id });
+		}
+	}
+
+	#markSessionWaitingApproval(sessionId: string): void {
+		const existing = this.#sessions.get(sessionId);
+		if (existing === undefined) {
+			return;
+		}
+		this.#upsertSession({ ...existing, state: "waiting-approval", updatedAt: new Date() }, { emit: true });
+	}
+
+	/** After the last approval for a session is answered, it is running again. */
+	#restoreSessionAfterApproval(sessionId: string): void {
+		const stillWaiting = [...this.#approvals.values()].some(
+			(approval) => approval.request.sessionId === sessionId,
+		);
+		const existing = this.#sessions.get(sessionId);
+		if (stillWaiting || existing === undefined || existing.state !== "waiting-approval") {
+			return;
+		}
+		this.#upsertSession({ ...existing, state: "working", updatedAt: new Date() }, { emit: true });
 	}
 
 	#upsertSession(session: AgentSession, options: { emit: boolean }): void {

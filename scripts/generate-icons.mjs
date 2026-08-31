@@ -181,6 +181,18 @@ const GLYPHS = {
 	stop(canvas) {
 		canvas.roundedRect(0.2, 0.2, 0.6, 0.6, 0.1, PALETTE.danger);
 	},
+	approve(canvas) {
+		// A ring with a tick: the ring is the hold, the tick is the answer.
+		canvas.circle(0.5, 0.5, 0.38, PALETTE.ok);
+		canvas.circle(0.5, 0.5, 0.29, PALETTE.background);
+		canvas.roundedRect(0.3, 0.48, 0.16, 0.08, 0.04, PALETTE.ok);
+		canvas.roundedRect(0.44, 0.34, 0.08, 0.24, 0.04, PALETTE.ok);
+	},
+	deny(canvas) {
+		canvas.circle(0.5, 0.5, 0.38, PALETTE.danger);
+		canvas.circle(0.5, 0.5, 0.29, PALETTE.background);
+		canvas.roundedRect(0.28, 0.46, 0.44, 0.08, 0.04, PALETTE.danger);
+	},
 	usage(canvas) {
 		canvas.roundedRect(0.16, 0.54, 0.16, 0.3, 0.05, PALETTE.ok);
 		canvas.roundedRect(0.42, 0.36, 0.16, 0.48, 0.05, PALETTE.warn);
@@ -229,7 +241,7 @@ function write(relativePath, buffer) {
 	return target;
 }
 
-const ACTIONS = ["agent", "stop", "usage", "git", "project", "launcher", "dashboard"];
+const ACTIONS = ["agent", "stop", "approve", "deny", "usage", "git", "project", "launcher", "dashboard"];
 
 write("plugin/icon.png", render("plugin", 288, false));
 write("plugin/icon@2x.png", render("plugin", 576, false));

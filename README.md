@@ -5,13 +5,13 @@ Monitor and control local AI coding agents from an Elgato Stream Deck +.
 AgentDeck is a **controller**, not another AI client. It drives the agents you
 already run — Codex and Claude Code today, others behind the same provider
 interface — so the
-deck answers four questions without a context switch: what is the agent doing,
-how much quota is left, what does the working tree look like, and how do I stop
-it right now.
+deck answers five questions without a context switch: what is the agent doing,
+how much quota is left, what does the working tree look like, how do I answer the
+approval it is waiting on, and how do I stop it right now.
 
-![A Stream Deck + running AgentDeck: eight keys showing agent status, stop, usage and git, above a four-segment touch strip](docs/images/deck.svg)
+![A Stream Deck + running AgentDeck: eight keys showing agent status, stop, approve, deny, usage for two providers, git and project, above a four-segment touch strip](docs/images/deck.svg)
 
-<sub>Six action types across two providers. The strip's fourth segment follows the active project; the two below it are the alternatives you can set an encoder to, including the AI Overview — providers side by side, never summed. Generated from the shipped renderers by <code>npm run preview</code>.</sub>
+<sub>Eight action types across two providers, with an agent waiting on a high-risk approval: the Approve key shows a hold ring mid-hold, Deny is one press. Below the strip are the segments an encoder can be set to instead, including the AI Overview — providers side by side, never summed. Generated from the shipped renderers by <code>npm run preview</code>.</sub>
 
 - **Design document (source of truth):** [`AGENTDECK_DESIGN.md`](./AGENTDECK_DESIGN.md)
 - **Implementation brief:** [`docs/AGENTDECK_CLAUDE_INSTRUCTIONS.md`](./docs/AGENTDECK_CLAUDE_INSTRUCTIONS.md)
@@ -19,7 +19,8 @@ it right now.
 
 ## Status
 
-Technical Spike and v0.1 Control Core complete. Claude usage (a v0.2 item) is in.
+Technical Spike and v0.1 Control Core complete. Claude usage (v0.2) and the
+Approval UI and Model / Reasoning selector (v0.4) are in.
 
 | Spike             | Scope                                                           | State                |
 | ----------------- | --------------------------------------------------------------- | -------------------- |
@@ -70,13 +71,60 @@ npx @elgato/cli restart com.agentdeck.streamdeck-plus
 
 ## Actions
 
-| Action            | Controller | Behaviour                                                            |
-| ----------------- | ---------- | -------------------------------------------------------------------- |
-| Agent Status      | Key        | Provider, session state, elapsed turn time. Press re-reads sessions. |
-| Stop Agent        | Key        | Interrupts the active turn. Dimmed when nothing is running.          |
-| Usage             | Key        | One rate-limit window, auto or pinned. Press refreshes.              |
-| Git Status        | Key        | Branch and working-tree counts. Press refreshes.                     |
-| Dashboard Segment | Encoder    | One touch-strip segment; four of them form a single dashboard.       |
+| Action            | Controller | Behaviour                                                                          |
+| ----------------- | ---------- | ---------------------------------------------------------------------------------- |
+| Agent Status      | Key        | Provider, session state, elapsed turn time. Press re-reads sessions.               |
+| Stop Agent        | Key        | Interrupts the active turn. Dimmed when nothing is running.                        |
+| Approve Once      | Key        | Approves the waiting request. High risk must be held; see [Approvals](#approvals). |
+| Deny              | Key        | Refuses the waiting request. Always one press.                                     |
+| Usage             | Key        | One rate-limit window, auto or pinned. Press refreshes.                            |
+| Git Status        | Key        | Branch and working-tree counts. Press refreshes.                                   |
+| Project           | Key        | Shows and switches the active project. See [Projects](#projects).                  |
+| App Launcher      | Key        | Starts an app in the active project. See [Launching apps](#launching-apps).        |
+| Dashboard Segment | Encoder    | One touch-strip segment; four of them form a single dashboard.                     |
+
+The default strip is `USAGE · AGENT · MODEL · PROJECT` (design §6.1). Git,
+Provider health and the AI Overview are one Segment setting away on any encoder.
+
+## Approvals
+
+When Codex asks to run a command or write a file, the request appears on the
+Approve and Deny keys with what is being asked for and how risky it looks.
+
+- **Approve Once, and only once.** Codex's protocol offers several ways to say
+  "yes, and stop asking" — for this session, as an exec-policy amendment, as a
+  network-policy rule. AgentDeck emits none of them. The mapper takes a
+  two-value decision type, so a persistent approval is not something the code
+  declines to send; it is something it cannot express.
+- **High risk must be held.** A destructive command, a fetch piped into a shell,
+  a write outside the project, or anything the deck cannot parse is high risk:
+  the key shows a ring that fills as you hold it, and releasing early sends
+  nothing. Everything else is a single press. The hold time is configurable
+  between 0.5 and 5 seconds, and cannot be turned off.
+- **Nothing answers for you.** There is no timeout and no default. The one
+  exception is a disconnect: if the app-server goes away with a request still
+  waiting, AgentDeck denies it rather than leaving it ambiguous.
+
+Risk is judged from the command itself, including through the `bash -lc "…"`
+wrapper Codex usually runs behind, and per command in a chain — `git add -A && rm
+-rf /tmp/x` is high risk, not low. Anything that could hide a command from that
+reading, such as a substitution or an unbalanced quote, is treated as high risk
+rather than guessed at.
+
+Approvals are raised by the client that owns the conversation, so AgentDeck sees
+the ones for turns it starts itself. Starting turns from the deck is v0.3 work;
+until then this path is exercised end to end against the app-server protocol in
+tests, not yet against a turn you began on the deck.
+
+## Choosing a model
+
+Set an encoder to the **Model** segment. Rotating steps through the models the
+provider reports — never a hard-coded list — and each of their reasoning levels;
+pressing applies the highlighted one to the active session.
+
+Rotating alone changes nothing, and the segment says so: an unapplied choice
+reads `high · press`. A provider that cannot list or apply models renders the
+segment as unavailable instead of failing on press.
 
 ## Projects
 
@@ -109,10 +157,10 @@ press.
 
 ## Providers
 
-| Provider | Monitor                     | Control               | How it connects                                   |
-| -------- | --------------------------- | --------------------- | ------------------------------------------------- |
-| Codex    | usage, sessions, turn state | stop the running turn | `codex app-server --stdio`, JSON-RPC              |
-| Claude   | usage, open session, model  | —                     | Claude Code's status line, via AgentDeck's bridge |
+| Provider | Monitor                     | Control                                    | How it connects                                   |
+| -------- | --------------------------- | ------------------------------------------ | ------------------------------------------------- |
+| Codex    | usage, sessions, turn state | stop the turn, answer approvals, set model | `codex app-server --stdio`, JSON-RPC              |
+| Claude   | usage, open session, model  | —                                          | Claude Code's status line, via AgentDeck's bridge |
 
 Claude is monitoring-only, and that is a finding rather than a shortcut. Claude
 Code publishes rate-limit percentages, but exposes no local usage cache to poll,
@@ -165,10 +213,11 @@ Every state is a colour and one short word. Nothing on the deck needs reading
 twice, and nothing needs scrolling — long output belongs in Codex or the editor,
 not here (design §3.5).
 
-![Key faces for each state: idle, working, approval, done, error, offline, CLI not found, login required, stale and rate-limited](docs/images/states.svg)
+![Key faces for each state: idle, working, approval, done, error, offline, CLI not found, login required, stale, rate-limited, and the approve and deny keys with and without a request waiting](docs/images/states.svg)
 
-The top row is the agent's own state; the bottom row is everything that can go
-wrong around it. A provider problem outranks a stale session, so `CLI?` and
+The top row is the agent's own state; the next two are everything that can go
+wrong around it; the last is the approval pair, where the difference between one
+press and a hold is the whole of the safety rule. A provider problem outranks a stale session, so `CLI?` and
 `LOGIN` replace the session state rather than sitting beside it — and a failed
 refresh keeps the last good number under a `STALE` badge instead of blanking the
 key.
@@ -182,7 +231,7 @@ Both images come from `npm run preview`, which runs the real `key-renderer` and
 ```text
 Presentation  actions/ · presentation/
      ↓
-Application   usage-service · session-service · git-service · provider-registry
+Application   usage · session · git · project · approval · model · registry
      ↓
 Domain        project · session · usage · approval · model · errors
      ↑
@@ -200,8 +249,10 @@ Two rules hold everywhere and are enforced by lint, not just by convention:
 
 ## Safety
 
-- No `Always Approve`; approval is once-only by design, and high-risk requests
-  require hold-to-approve.
+- No `Always Approve`. Approval is once-only _by construction_: the wire mapper
+  takes a two-value decision type, so Codex's session-wide and policy-amending
+  variants are unreachable rather than merely unused. High-risk requests require
+  hold-to-approve, and a disconnect denies whatever is still waiting.
 - Credentials are read through the provider's own store; the plugin never copies
   or persists them.
 - Every log line passes through a redactor. OAuth tokens, API keys, `Authorization`

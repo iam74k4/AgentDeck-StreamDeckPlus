@@ -56,6 +56,36 @@
 			]
 		},
 		{
+			"UUID": "com.agentdeck.streamdeck-plus.approve",
+			"Name": "Approve Once",
+			"Tooltip": "Approves the waiting request once. High-risk requests must be held.",
+			"Icon": "imgs/actions/approve/icon",
+			"Controllers": ["Keypad"],
+			"PropertyInspectorPath": "ui/approve.html",
+			"States": [
+				{
+					"Image": "imgs/actions/approve/key",
+					"TitleAlignment": "middle",
+					"ShowTitle": false
+				}
+			]
+		},
+		{
+			"UUID": "com.agentdeck.streamdeck-plus.deny",
+			"Name": "Deny",
+			"Tooltip": "Denies the waiting request. Always a single press.",
+			"Icon": "imgs/actions/deny/icon",
+			"Controllers": ["Keypad"],
+			"PropertyInspectorPath": "ui/deny.html",
+			"States": [
+				{
+					"Image": "imgs/actions/deny/key",
+					"TitleAlignment": "middle",
+					"ShowTitle": false
+				}
+			]
+		},
+		{
 			"UUID": "com.agentdeck.streamdeck-plus.usage",
 			"Name": "Usage",
 			"Tooltip": "Shows a provider's rate-limit window. Press to refresh.",

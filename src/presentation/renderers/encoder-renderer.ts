@@ -10,6 +10,7 @@
 
 import type { AgentStatusViewModel } from "../view-models/agent-status.js";
 import type { GitViewModel } from "../view-models/git.js";
+import type { ModelViewModel } from "../view-models/model.js";
 import type { OverviewViewModel } from "../view-models/overview.js";
 import type { ProjectViewModel } from "../view-models/project.js";
 import type { ProviderViewModel } from "../view-models/provider.js";
@@ -107,6 +108,11 @@ export function renderOverviewSegment(vm: OverviewViewModel): SegmentFeedback {
 }
 
 /** Design §6.1 — the active project and how many there are to switch between. */
+/** Design §6.1 — the MODEL column of the default touch strip. */
+export function renderModelSegment(vm: ModelViewModel): SegmentFeedback {
+	return segment("MODEL", fit(vm.title, 14), fit(vm.detail, 20), vm.color);
+}
+
 export function renderProjectSegment(vm: ProjectViewModel): SegmentFeedback {
 	const feedback = segment("PROJECT", fit(vm.name, 14), fit(vm.detail, 24), vm.color);
 	feedback.value.color = vm.available ? Palette.text : Palette.textMuted;

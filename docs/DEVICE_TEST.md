@@ -39,7 +39,8 @@ npx @elgato/cli restart com.agentdeck.streamdeck-plus
 
 ![AgentDeckを載せたStream Deck +](images/deck.svg)
 
-上段4キーが日常操作、下段は同じAction種別を別設定で並べた例。
+上段4キーがAgentへの応答（状態・停止・承認・拒否）、下段が文脈（Usage 2 Provider・
+Git・Project）。
 Touch Stripは4本すべてに Dashboard Segment を置くと1枚のダッシュボードとして
 協調動作し、3本以下なら各Actionの `Segment` 設定に従う。
 
@@ -70,19 +71,44 @@ Git作業ツリーの絶対パスを設定する。
 ### 3.3 Encoder / Touch Strip
 
 - [ ] Dashboard Segment を4つ配置すると、列位置どおりに
-      `USAGE / AGENT / GIT / CODEX` が並ぶ
+      `USAGE / AGENT / MODEL / PROJECT` が並ぶ（設計書 §6.1）
 - [ ] 3つ以下のときは各Actionの `Segment` 設定に従う（Standalone Segment Mode）
 - [ ] ダイヤル押下で更新される
 - [ ] Touch Strip タップで更新される
 - [ ] ダイヤル回転で表示が切り替わる
 
-### 3.4 Profile切替 / 再接続
+### 3.4 Approval（設計書 §12.4 / §22.2）
+
+Codexの承認要求は、その会話を持つClientへ届く。AgentDeckは自分のapp-server
+プロセスを持つため、**AgentDeck自身が開始したTurn**の承認が対象になる。
+Turn開始はv0.3の作業なので、この節は該当機能が入るまで実施できない項目を含む。
+
+- [ ] 承認待ちのとき Approve / Deny キーに要求内容が表示される
+- [ ] 低リスク要求は Approve キーの1押しで承認される
+- [ ] 高リスク要求（`rm -rf` 等）は `HOLD` 表示になり、押し続けるとリングが
+      満ちてから承認される
+- [ ] 高リスク要求で途中で指を離すと承認されない
+- [ ] Deny はリスクに関わらず1押しで拒否される
+- [ ] 承認待ちが無いときに押すとアラート表示になり、何も送信されない
+- [ ] 承認後、Agent Status が `APPROVAL` から `WORKING` へ戻る
+- [ ] 承認待ちのまま app-server を強制終了すると、キーが承認待ち表示のまま
+      残らない
+
+### 3.5 Model / Reasoning（設計書 §19）
+
+- [ ] Encoder の Segment を Model にすると、Codexが返すモデル名が表示される
+- [ ] 回転でモデルとReasoning levelが切り替わり、`… · press` が表示される
+- [ ] 回転しただけでは適用されない（Codex側のモデルが変わらないこと）
+- [ ] 押下で適用され、表示から `press` が消える
+- [ ] Provider を Claude にすると `not supported` になり、押下しても失敗しない
+
+### 3.6 Profile切替 / 再接続
 
 - [ ] Profileを切り替えてもEncoderの登録が壊れず、戻すと正しく再描画される
 - [ ] Stream Deckを抜き差ししてもPluginが落ちない
 - [ ] Stream Deckアプリを再起動してもPluginが復帰する
 
-### 3.5 Claude bridge
+### 3.7 Claude bridge
 
 - [ ] Claude Code の `statusLine` に bridge を設定し、Usage キーの Provider を
       Claude にすると % が表示される
@@ -93,7 +119,7 @@ Git作業ツリーの絶対パスを設定する。
 - [ ] Touch Strip の AI Overview に Claude と Codex が並び、合算されない
 - [ ] Provider を Claude にした STOP キーは点灯しない（制御チャネルが無いため）
 
-### 3.6 Failure（設計書 §26 Failure Test）
+### 3.8 Failure（設計書 §26 Failure Test）
 
 - [ ] Codex CLIが無い環境で `CLI?` と表示され、Pluginは動き続ける
 - [ ] Codex未ログイン時に `LOGIN` と表示される
@@ -103,11 +129,12 @@ Git作業ツリーの絶対パスを設定する。
 - [ ] Gitリポジトリでないパスを設定すると `NO GIT` と表示される
 - [ ] Active Sessionが無い状態でSTOPを押しても落ちず、アラート表示になる
 
-### 3.7 Security（指示書 §11）
+### 3.9 Security（指示書 §11）
 
 - [ ] `%appdata%\Elgato\StreamDeck\logs` のPluginログに
       OAuth Token / API Key / Authorization ヘッダが含まれない
 - [ ] Debug Logging を有効にしても上記が出力されない
+- [ ] 承認要求のコマンド全文がログに出ない（要求の種別とリスクのみ）
 
 ## 4. 記録
 

@@ -7,12 +7,15 @@
  * from a real view model. Change a renderer and `npm run preview` shows it.
  */
 
+import type { ApprovalRequest } from "../domain/approval.js";
+import type { ModelState } from "../application/model-service.js";
 import type { AgentSessionState } from "../domain/session.js";
 import type { ProviderOverviewEntry } from "../application/usage-service.js";
 import type { UsageSnapshot } from "../domain/usage.js";
 import {
 	escapeXml,
 	renderAgentStatusKey,
+	renderApprovalKey,
 	renderGitKey,
 	renderLauncherKey,
 	renderProjectKey,
@@ -22,6 +25,7 @@ import {
 import {
 	renderAgentSegment,
 	renderGitSegment,
+	renderModelSegment,
 	renderOverviewSegment,
 	renderProjectSegment,
 	renderProviderSegment,
@@ -29,7 +33,9 @@ import {
 	type SegmentFeedback,
 } from "../presentation/renderers/encoder-renderer.js";
 import { buildAgentStatusViewModel } from "../presentation/view-models/agent-status.js";
+import { buildApproveKeyViewModel, buildDenyKeyViewModel } from "../presentation/view-models/approval.js";
 import { buildGitViewModel } from "../presentation/view-models/git.js";
+import { buildModelViewModel } from "../presentation/view-models/model.js";
 import { buildOverviewViewModel } from "../presentation/view-models/overview.js";
 import { buildProjectViewModel } from "../presentation/view-models/project.js";
 import { buildProviderViewModel } from "../presentation/view-models/provider.js";
@@ -144,6 +150,31 @@ const OVERVIEW: ProviderOverviewEntry[] = [
 	},
 ];
 
+/** A request that needs a hold, so the Approve key shows the ring (design §22.2). */
+const APPROVAL_HIGH_RISK: ApprovalRequest = {
+	id: "req_1",
+	sessionId: "thr_1",
+	type: "command",
+	title: "rm -rf build",
+	summary: "clean the output directory",
+	risk: "high",
+};
+
+/** A model rotated to `high` but not yet applied, so the segment asks for a press. */
+const MODEL_STATE: ModelState = {
+	providerId: "codex",
+	supported: true,
+	models: [{ id: "gpt-5.1-codex", label: "GPT-5.1 Codex", reasoningLevels: ["medium", "high"] }],
+	choices: [
+		{ modelId: "gpt-5.1-codex", reasoningLevel: "medium" },
+		{ modelId: "gpt-5.1-codex", reasoningLevel: "high" },
+	],
+	highlighted: { modelId: "gpt-5.1-codex", reasoningLevel: "high" },
+	applied: { modelId: "gpt-5.1-codex", reasoningLevel: "medium" },
+	loading: false,
+	error: undefined,
+};
+
 function session(state: AgentSessionState, startedMsAgo?: number) {
 	return {
 		id: "thr_1",
@@ -155,6 +186,24 @@ function session(state: AgentSessionState, startedMsAgo?: number) {
 }
 
 const gitEntry = (overrides: Parameters<typeof buildGitViewModel>[0]) => buildGitViewModel(overrides);
+
+/** One repository, used by both the Git key and the Git segment. */
+const REPO_STATUS = gitEntry({
+	path: "/repo",
+	fetchedAt: NOW,
+	status: {
+		repositoryPath: "/repo",
+		branch: "main",
+		detached: false,
+		hasCommits: true,
+		modified: 4,
+		staged: 2,
+		untracked: 1,
+		conflicted: 0,
+		ahead: 1,
+		behind: 0,
+	},
+});
 
 function usageKey(options: Parameters<typeof buildUsageViewModel>[0]): string {
 	return renderUsageKey(buildUsageViewModel({ now: NOW, ...options }));
@@ -207,64 +256,30 @@ export function renderDeckPreview(layout: SegmentLayout): string {
 	const width = CONTENT + PAD * 2;
 
 	const keys = [
-		// Row 1 — the everyday four.
-		agentKey({ providerLabel: "Codex", providerStatus: "ready", session: session("working", 138_000) }),
+		// Row 1 — control: what the agent is doing, and the three answers to it.
+		agentKey({ providerLabel: "Codex", providerStatus: "ready", session: session("waiting-approval") }),
 		renderStopKey(true),
+		// A high-risk request, so the Approve key shows the hold ring mid-hold.
+		renderApprovalKey(buildApproveKeyViewModel({ request: APPROVAL_HIGH_RISK, holdProgress: 0.55 })),
+		renderApprovalKey(buildDenyKeyViewModel({ request: APPROVAL_HIGH_RISK })),
+		// Row 2 — context: both providers' usage, the repository and the project.
 		usageKey({
 			providerLabel: "Codex",
 			snapshot: snapshot(),
 			selection: { mode: "pinned", windowId: "codex.primary" },
 		}),
-		renderGitKey(
-			gitEntry({
-				path: "/repo",
-				fetchedAt: NOW,
-				status: {
-					repositoryPath: "/repo",
-					branch: "main",
-					detached: false,
-					hasCommits: true,
-					modified: 4,
-					staged: 2,
-					untracked: 1,
-					conflicted: 0,
-					ahead: 1,
-					behind: 0,
-				},
-			}),
-		),
-		// Row 2 — the same actions, pointed at a second provider and other windows.
-		renderProjectKey(
-			buildProjectViewModel({
-				active: { id: "p1", name: "agentdeck", path: "/src/agentdeck" },
-				total: 3,
-				gitSummary: "main",
-			}),
-		),
-		// Keeps the reset-time detail row rendered end to end.
 		usageKey({
 			providerLabel: "Claude",
 			snapshot: claudeSnapshot(),
 			selection: { mode: "pinned", windowId: "claude.seven_day" },
 			showResetAt: true,
 		}),
-		renderLauncherKey({ name: "VS Code", detail: "agentdeck", installed: true }),
-		renderGitKey(
-			gitEntry({
-				path: "/docs",
-				fetchedAt: NOW,
-				status: {
-					repositoryPath: "/docs",
-					branch: "release/1.2",
-					detached: false,
-					hasCommits: true,
-					modified: 0,
-					staged: 0,
-					untracked: 0,
-					conflicted: 0,
-					ahead: 0,
-					behind: 2,
-				},
+		renderGitKey(REPO_STATUS),
+		renderProjectKey(
+			buildProjectViewModel({
+				active: { id: "p1", name: "agentdeck", path: "/src/agentdeck" },
+				total: 3,
+				gitSummary: "main",
 			}),
 		),
 	];
@@ -286,24 +301,7 @@ export function renderDeckPreview(layout: SegmentLayout): string {
 				now: NOW,
 			}),
 		),
-		renderGitSegment(
-			gitEntry({
-				path: "/repo",
-				fetchedAt: NOW,
-				status: {
-					repositoryPath: "/repo",
-					branch: "main",
-					detached: false,
-					hasCommits: true,
-					modified: 4,
-					staged: 2,
-					untracked: 1,
-					conflicted: 0,
-					ahead: 1,
-					behind: 0,
-				},
-			}),
-		),
+		renderModelSegment(buildModelViewModel(MODEL_STATE)),
 		renderProjectSegment(
 			buildProjectViewModel({
 				active: { id: "p1", name: "agentdeck", path: "/src/agentdeck" },
@@ -336,14 +334,22 @@ export function renderDeckPreview(layout: SegmentLayout): string {
 				label("ROTATE · PRESS", cx, dialY + 44, 9, "#4a4d52"),
 			].join("");
 		}),
-		// Segments are a per-encoder setting; these two are the alternatives to the
-		// defaults above.
-		label("OTHER SEGMENTS", PAD + 100, altY - 12, 10, "#4a4d52"),
+		// Segments and keys are per-action settings; these are the alternatives to
+		// the defaults above.
+		label("OTHER SEGMENTS", PAD + (SEGMENT_WIDTH * 3) / 2, altY - 12, 10, "#4a4d52"),
 		`<g transform="translate(${PAD},${altY})">`,
-		`<rect x="-4" y="-4" width="${SEGMENT_WIDTH * 2 + 8}" height="${SEGMENT_HEIGHT + 8}" rx="10" fill="#0b0c0e"/>`,
-		`<g>${drawSegment(layout, renderOverviewSegment(buildOverviewViewModel(OVERVIEW)))}</g>`,
-		`<g transform="translate(${SEGMENT_WIDTH},0)">${drawSegment(layout, renderProviderSegment(buildProviderViewModel({ label: "Codex", status: "ready" })))}</g>`,
+		`<rect x="-4" y="-4" width="${SEGMENT_WIDTH * 3 + 8}" height="${SEGMENT_HEIGHT + 8}" rx="10" fill="#0b0c0e"/>`,
+		`<g>${drawSegment(layout, renderGitSegment(REPO_STATUS))}</g>`,
+		`<g transform="translate(${SEGMENT_WIDTH},0)">${drawSegment(layout, renderOverviewSegment(buildOverviewViewModel(OVERVIEW)))}</g>`,
+		`<g transform="translate(${SEGMENT_WIDTH * 2},0)">${drawSegment(layout, renderProviderSegment(buildProviderViewModel({ label: "Codex", status: "ready" })))}</g>`,
 		`</g>`,
+		label("OTHER KEYS", PAD + SEGMENT_WIDTH * 3 + 90, altY - 12, 10, "#4a4d52"),
+		placeKey(
+			renderLauncherKey({ name: "VS Code", detail: "agentdeck", installed: true }),
+			PAD + SEGMENT_WIDTH * 3 + 36,
+			altY,
+			SEGMENT_HEIGHT,
+		),
 	].join("");
 
 	return document_(width, height, body);
@@ -434,6 +440,32 @@ export function renderStatePreview(): string {
 			key: renderGitKey(gitEntry({ path: "/tmp", fetchedAt: NOW, errorCode: "GIT_NOT_REPOSITORY" })),
 			caption: "NO GIT",
 			note: "path is not a repository",
+		},
+		// The three faces of the Approve key. The difference between the first two
+		// is the whole of design §22.2, so it is worth showing rather than describing.
+		{
+			key: renderApprovalKey(buildApproveKeyViewModel({})),
+			caption: "NO REQUEST",
+			note: "nothing to approve",
+		},
+		{
+			key: renderApprovalKey(
+				buildApproveKeyViewModel({
+					request: { ...APPROVAL_HIGH_RISK, title: "npm run build", risk: "low" },
+				}),
+			),
+			caption: "APPROVE",
+			note: "low risk: one press",
+		},
+		{
+			key: renderApprovalKey(buildApproveKeyViewModel({ request: APPROVAL_HIGH_RISK, holdProgress: 0.55 })),
+			caption: "HOLD",
+			note: "high risk: hold to approve",
+		},
+		{
+			key: renderApprovalKey(buildDenyKeyViewModel({ request: APPROVAL_HIGH_RISK })),
+			caption: "DENY",
+			note: "always one press",
 		},
 	];
 

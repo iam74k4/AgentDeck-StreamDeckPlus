@@ -31,19 +31,19 @@ export class SessionService {
 		this.#registry = registry;
 		this.#logger = options.logger?.child("session");
 
-		this.#unsubscribe = registry.subscribe((event) => {
+		this.#unsubscribe = registry.subscribe((event, providerId) => {
 			if (event.type === "session-updated") {
 				this.#sessions.set(this.#key(event.session), event.session);
 				this.#notify();
 				return;
 			}
 			if (event.type === "session-removed") {
-				for (const [key, session] of this.#sessions) {
-					if (session.id === event.sessionId) {
-						this.#sessions.delete(key);
-					}
-				}
-				if (this.#pinnedSessionId === event.sessionId) {
+				// Session ids are only unique per provider, so remove the exact one
+				// rather than every session that happens to share the id.
+				const key = `${providerId}::${event.sessionId}`;
+				const removed = this.#sessions.get(key);
+				this.#sessions.delete(key);
+				if (removed !== undefined && this.#pinnedSessionId === event.sessionId) {
 					this.#pinnedSessionId = undefined;
 				}
 				this.#notify();

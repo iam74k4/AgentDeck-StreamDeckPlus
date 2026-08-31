@@ -469,4 +469,105 @@ Touch Strip 第4列の既定を `PROVIDER` から `OVERVIEW` へ変更した（�
 
 - **実機検証**（[`DEVICE_TEST.md`](./DEVICE_TEST.md)）— 唯一の未達
 - Claude Desktop deep link（設計書 §10.4）
-- v0.3 / v0.4（Voice / Screenshot / Approval / Model selector）は未着手
+
+---
+
+## 8. v0.4 — Approval UI / Model selector
+
+指示書 §5.4 のうち Approval UI と Model / Reasoning selector を実装した。
+Plan Progress / Diff Summary / Session Manager強化は未着手。
+
+### Approval
+
+#### Codexには承認要求の窓口が2つある
+
+`openai/codex` の `server_request_definitions!` を読み直したところ、
+Server→Client の承認要求は起動経路によって別のメソッドになる。
+
+| メソッド                                | 対象                                   | 応答の語彙                 |
+| --------------------------------------- | -------------------------------------- | -------------------------- |
+| `item/commandExecution/requestApproval` | `turn/start` で開始したTurn（現行API） | `accept` / `decline` ほか  |
+| `item/fileChange/requestApproval`       | 同上                                   | `accept` / `decline` ほか  |
+| `execCommandApproval`                   | `sendUserTurn` 等のレガシーAPI         | `approved` / `denied` ほか |
+| `applyPatchApproval`                    | 同上                                   | 同上                       |
+
+当初はレガシー側だけを実装していた。現行APIを使うClientに届くのは上の2つなので、
+`providers/codex/approval-mapper.ts` は4つすべてを受け、**要求が届いたメソッドと
+同じ方言で応答する**。無応答はAgentを永久に待たせるため、レガシー側も答える。
+
+#### `Always Approve` を構造的に送れないようにする
+
+両方の語彙に「以後聞かない」系の値がある。
+
+```text
+現行  acceptForSession / acceptWithExecpolicyAmendment / applyNetworkPolicyAmendment
+旧    approved_for_session / approved_execpolicy_amendment
+      approved_mcp_policy_amendment / network_policy_amendment
+```
+
+指示書 §2.5 はこれらすべてを禁じている。Mapperの関数はいずれも
+`ApprovalDecision`（`"approve-once" | "deny"` の2値）だけを受け取るため、
+禁止値は「送らない」のではなく**表現できない**。テストは4メソッド×2決定の
+直積をシリアライズし、禁止語がバイト列に現れないことを確認する。
+
+#### リスク判定は `bash -lc` の内側を読む
+
+Codexはほとんどのコマンドを `["bash","-lc","<script>"]` で実行する。
+`argv[0]` だけを見ると全部 `bash` になり、`rm -rf` が低リスクになってしまう。
+`domain/approval.ts` はシェルラッパを解いて中のスクリプトを取り出し、
+`|` `&&` `;` で区切った**各コマンドを個別に**判定する。
+
+判定できない入力は `high`（＝Hold必須）に倒す。コマンド置換（`$(…)` / backtick）や
+引用符の不一致は、コマンドを隠せてしまうため解析を諦めて `high` にする。
+
+現行APIの `item/fileChange/requestApproval` はファイルパスを含まない
+（`itemId` で参照する）。デッキ上で内容を判断できない以上 `high` として扱い、
+Hold を要求する。
+
+#### 誰も代わりに答えない
+
+タイムアウトも既定値も置いていない。唯一の例外は切断で、app-serverが去る前に
+待機中の要求を `deny` で閉じる（設計書 §22.2 fail closed）。
+
+### Model / Reasoning selector
+
+`thread/settings/update` の `model` / `effort` のみを送る。同APIには
+approval policy / sandbox policy / permission profile も乗るが、デッキから
+Codex側の安全設定を緩められてしまうため**意図的に送らない**。
+
+回転はハイライトの移動だけで、適用は押下時のみ（設計書 §19）。
+未適用のハイライトは `… · press` と表示して区別する。
+
+### Touch Strip 第3列
+
+設計差異3で `GIT` に置いていた第3列を、設計書 §6.1 のとおり `MODEL` にした。
+`GIT` は Segment 設定で選べる（Overview / Provider と同じ扱い）。
+
+### 検出した不具合
+
+- **`APPROVE` が `PPROV` と描画される。** プレート上に背景色で描く文字が
+  プレート幅を超えると、はみ出した部分が背景に溶けて消える。SVGは文字幅を
+  測れないため、`fitFontSize` で収まるサイズまで縮めるようにした。
+  プレビュー画像をPNGへ落として目視したときにだけ見つかる種類の不具合で、
+  回帰テストは推定幅がプレート幅以下であることを検査する。
+- **Hold中にキューが動くと、読んでいない要求を承認しうる。** Holdは約1秒かかる。
+  完了時に「今の先頭」を承認する実装だと、その間に元の要求が別経路で解決されて
+  次の要求が先頭に来た場合、ユーザーが読んでいない要求をHoldが承認してしまう。
+  Approve / Deny とも**描画した要求のidを指定して**解決するようにし、Holdの各
+  フレームで対象がまだ待機中かを確認するようにした。
+- **切断時の `deny` がワイヤに出ない。** 応答の書き込みはPromiseの継続で
+  起きるため、`transport.close()` の直前に1マイクロタスク譲るだけでは間に合わない。
+  イベントループを1周譲るように直し、統合テストで実際のバイト列を確認した。
+
+### 制約（過大評価しないための注記）
+
+承認要求は**その会話を持つClient**へ届く。AgentDeckは自前のapp-serverプロセスを
+持つため、届くのは原則としてAgentDeck自身が開始したTurnの承認である。
+Turn開始（`turn/start`）はv0.3の作業のため、現時点でこの経路はプロトコル
+レベルの統合テストで検証済みだが、デッキから始めたTurnでの実地検証は未了。
+
+### 残課題
+
+- 実機検証（[`DEVICE_TEST.md`](./DEVICE_TEST.md) §3.4 / §3.5）
+- v0.4 の残り（Plan Progress / Diff Summary / Session Manager強化）
+- v0.3（Push-to-Talk / Dictation / Voice Steer / Screenshot → AI）
