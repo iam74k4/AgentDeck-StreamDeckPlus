@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<title>Prompt</title>
+		<link rel="stylesheet" href="lib/pi.css" />
+	</head>
+	<body>
+		<h1>Prompt</h1>
+		<div class="row">
+			<label for="preset">Preset</label>
+			<select id="preset" data-setting="presetId">
+				<option value="">Follow the Prompt dial</option>
+				<option value="explain">Explain</option>
+				<option value="review">Review</option>
+				<option value="refactor">Refactor</option>
+				<option value="test">Test</option>
+				<option value="security">Security</option>
+				<option value="performance">Performance</option>
+				<option value="custom">Custom</option>
+			</select>
+		</div>
+		<p class="hint">
+			A preset says where its input comes from — the clipboard, the current selection, or a screenshot — and
+			where the result goes. Leave this empty to run whichever preset the Prompt dial has selected.
+		</p>
+		<div class="row">
+			<label for="text">Fixed text</label>
+			<input id="text" type="text" placeholder="(use the preset's input)" data-setting="text" />
+		</div>
+		<p class="hint">
+			Fill this in to send the same thing every press. It replaces the preset's input source, so the clipboard
+			is not read.
+		</p>
+		<div class="row">
+			<label for="provider">Provider</label>
+			<select id="provider" data-setting="providerId">
+				<option value="">Default (Codex)</option>
+				<option value="codex">Codex</option>
+			</select>
+		</div>
+		<p class="hint">
+			Claude Code has no control channel, so prompts can only be sent to Codex. Clipboard, selection and
+			screenshot capture need Windows.
+		</p>
+		<script src="lib/pi.js"></script>
+	</body>
+</html>

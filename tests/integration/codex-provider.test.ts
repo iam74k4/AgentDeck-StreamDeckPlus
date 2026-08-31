@@ -589,3 +589,91 @@ describe("model selection (design §19)", () => {
 		expect(provider.sessions[0]).toMatchObject({ modelId: "gpt-5.1-codex", reasoningLevel: "high" });
 	});
 });
+
+describe("sending input to a session (design §12.3)", () => {
+	function harness(): {
+		provider: CodexProvider;
+		sent: () => { method: string; params: Record<string, unknown> }[];
+	} {
+		const logPath = join(mkdtempSync(join(tmpdir(), "agentdeck-send-")), "sent.jsonl");
+		const provider = createProvider({ FAKE_ANSWER_LOG: logPath });
+		return {
+			provider,
+			sent: () =>
+				existsSync(logPath)
+					? readFileSync(logPath, "utf8")
+							.split("\n")
+							.filter((line) => line.trim().length > 0)
+							.map((line) => JSON.parse(line) as { method: string; params: Record<string, unknown> })
+					: [],
+		};
+	}
+
+	it("starts a turn on an idle session", async () => {
+		const { provider, sent } = harness();
+		await provider.start();
+		await waitFor(() => provider.sessions.length > 0);
+
+		await provider.steer("thr_1", { text: "run the tests" });
+
+		expect(sent()[0]).toEqual({
+			method: "turn/start",
+			params: { threadId: "thr_1", input: [{ type: "text", text: "run the tests" }] },
+		});
+		expect(provider.sessions[0]).toMatchObject({ state: "working", currentTurnId: "turn_started" });
+	});
+
+	it("steers a turn that is already running, pinned to that turn", async () => {
+		const { provider, sent } = harness();
+		await provider.start();
+		await waitFor(() => provider.sessions.length > 0);
+
+		// A turn is now in flight, so the next input joins it rather than starting
+		// a second one.
+		await provider.steer("thr_1", { text: "first" });
+		await provider.steer("thr_1", { text: "also check the docs" });
+
+		expect(sent()[1]).toEqual({
+			method: "turn/steer",
+			params: {
+				threadId: "thr_1",
+				input: [{ type: "text", text: "also check the docs" }],
+				expectedTurnId: "turn_started",
+			},
+		});
+	});
+
+	it("attaches a screenshot as a local image", async () => {
+		const { provider, sent } = harness();
+		await provider.start();
+		await waitFor(() => provider.sessions.length > 0);
+
+		await provider.steer("thr_1", { text: "what is wrong here?", imagePaths: ["C:/tmp/shot.png"] });
+
+		expect(sent()[0]?.params.input).toEqual([
+			{ type: "text", text: "what is wrong here?" },
+			{ type: "localImage", path: "C:/tmp/shot.png" },
+		]);
+	});
+
+	it("refuses to send nothing", async () => {
+		const { provider, sent } = harness();
+		await provider.start();
+		await waitFor(() => provider.sessions.length > 0);
+
+		await expect(provider.steer("thr_1", { text: "   " })).rejects.toMatchObject({
+			code: "PROTOCOL_ERROR",
+		});
+		expect(sent()).toEqual([]);
+	});
+
+	it("opens a thread rooted at the project directory", async () => {
+		const { provider, sent } = harness();
+		await provider.start();
+
+		const session = await provider.startSession({ cwd: "C:/work/Game" });
+
+		expect(session).toMatchObject({ id: "thr_new", providerId: "codex" });
+		expect(sent()[0]).toEqual({ method: "thread/start", params: { cwd: "C:/work/Game" } });
+	});
+});

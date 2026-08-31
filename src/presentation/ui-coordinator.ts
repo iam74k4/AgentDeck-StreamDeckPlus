@@ -10,6 +10,8 @@
 import type { ApprovalService, PendingApproval } from "../application/approval-service.js";
 import type { GitService, GitStatusEntry } from "../application/git-service.js";
 import type { ModelService } from "../application/model-service.js";
+import type { PromptService } from "../application/prompt-service.js";
+import type { VoiceService } from "../application/voice-service.js";
 import type { ProjectService } from "../application/project-service.js";
 import type { ProviderRegistry } from "../application/provider-registry.js";
 import type { SessionService } from "../application/session-service.js";
@@ -19,15 +21,19 @@ import type { ProviderId, UsageSnapshot, WindowSelection } from "../domain/usage
 import type { Logger } from "../infrastructure/logger.js";
 import { scheduleInterval, type ScheduledTask } from "../infrastructure/scheduler.js";
 import type { DashboardData } from "./plus-dashboard-coordinator.js";
+import type { VoiceViewModel } from "./view-models/voice.js";
 import { buildAgentStatusViewModel } from "./view-models/agent-status.js";
 import { buildGitViewModel } from "./view-models/git.js";
 import { buildModelViewModel } from "./view-models/model.js";
+import { buildPromptViewModel } from "./view-models/prompt.js";
+import { buildVoiceViewModel } from "./view-models/voice.js";
 import { buildOverviewViewModel } from "./view-models/overview.js";
 import { buildProjectViewModel } from "./view-models/project.js";
 import { buildProviderViewModel } from "./view-models/provider.js";
 import { buildUsageViewModel } from "./view-models/usage.js";
 
-export type UiConcern = "usage" | "session" | "git" | "project" | "provider" | "approval" | "model" | "tick";
+export type UiConcern =
+	"usage" | "session" | "git" | "project" | "provider" | "approval" | "model" | "prompt" | "voice" | "tick";
 
 export type UiListener = () => void;
 
@@ -46,6 +52,8 @@ export class UiCoordinator {
 	readonly #projects: ProjectService;
 	readonly #approvals: ApprovalService;
 	readonly #models: ModelService;
+	readonly #prompts: PromptService;
+	readonly #voice: VoiceService;
 	readonly #logger: Logger | undefined;
 	readonly #listeners = new Map<UiConcern, Set<UiListener>>();
 	readonly #unsubscribes: Unsubscribe[] = [];
@@ -62,6 +70,8 @@ export class UiCoordinator {
 			projects: ProjectService;
 			approvals: ApprovalService;
 			models: ModelService;
+			prompts: PromptService;
+			voice: VoiceService;
 		},
 		options: UiCoordinatorOptions = {},
 	) {
@@ -72,6 +82,8 @@ export class UiCoordinator {
 		this.#projects = services.projects;
 		this.#approvals = services.approvals;
 		this.#models = services.models;
+		this.#prompts = services.prompts;
+		this.#voice = services.voice;
 		this.#logger = options.logger?.child("ui");
 		this.#tickIntervalMs = options.tickIntervalMs ?? 1_000;
 		this.#now = options.now ?? (() => new Date());
@@ -86,6 +98,8 @@ export class UiCoordinator {
 			this.#projects.subscribe(() => this.invalidate("project")),
 			this.#approvals.subscribe(() => this.invalidate("approval")),
 			this.#models.subscribe(() => this.invalidate("model")),
+			this.#prompts.subscribe(() => this.invalidate("prompt")),
+			this.#voice.subscribe(() => this.invalidate("voice")),
 			this.#registry.subscribe((event) => {
 				if (event.type === "provider-status") {
 					this.invalidate("provider");
@@ -124,6 +138,14 @@ export class UiCoordinator {
 
 	public getGitEntry(path: string): GitStatusEntry | undefined {
 		return this.#git.get(path);
+	}
+
+	/** Design §13.4 / §22.3 — the recording state, shared by the key and the strip. */
+	public voiceViewModel(): VoiceViewModel {
+		return buildVoiceViewModel({
+			state: this.#voice.state,
+			...(this.#prompts.selected === undefined ? {} : { presetName: this.#prompts.selected.name }),
+		});
 	}
 
 	/** The approval the Approve / Deny keys act on, if any (design §12.4). */
@@ -165,6 +187,12 @@ export class UiCoordinator {
 			overview: buildOverviewViewModel(this.#usage.overview()),
 			git: buildGitViewModel(repositoryPath === undefined ? undefined : this.#git.get(repositoryPath)),
 			model: buildModelViewModel(this.#models.getState(options.providerId)),
+			voice: this.voiceViewModel(),
+			prompt: buildPromptViewModel({
+				...(this.#prompts.selected === undefined ? {} : { preset: this.#prompts.selected }),
+				index: this.#prompts.selectedIndex,
+				total: this.#prompts.list().length,
+			}),
 			project: buildProjectViewModel({
 				...(active === undefined ? {} : { active }),
 				total: this.#projects.list().length,

@@ -10,6 +10,8 @@ import type { AgentStatusViewModel } from "../view-models/agent-status.js";
 import type { ApprovalKeyViewModel } from "../view-models/approval.js";
 import type { GitViewModel } from "../view-models/git.js";
 import type { ProjectViewModel } from "../view-models/project.js";
+import type { PromptViewModel } from "../view-models/prompt.js";
+import type { VoiceViewModel } from "../view-models/voice.js";
 import type { UsageViewModel } from "../view-models/usage.js";
 import { Palette } from "../view-models/colors.js";
 
@@ -86,6 +88,28 @@ export function fitFontSize(value: string, maxWidth: number, maxSize: number, mi
 		size -= 1;
 	}
 	return size;
+}
+
+/**
+ * Shrinks a label to fit, and truncates it if shrinking is not enough.
+ *
+ * Shrinking alone bottoms out at `minSize`, where a long enough word still runs
+ * off the key — "Internationalisation" does at any size a key can read. Both
+ * steps are needed, in this order: nothing is truncated that could simply have
+ * been drawn smaller.
+ */
+export function fitText(
+	value: string,
+	maxWidth: number,
+	maxSize: number,
+	minSize: number,
+): { value: string; size: number } {
+	const size = fitFontSize(value, maxWidth, maxSize, minSize);
+	if (estimateWidth(value, size) <= maxWidth) {
+		return { value, size };
+	}
+	const maxCharacters = Math.max(1, Math.floor(maxWidth / (size * 0.66)));
+	return { value: fit(value, maxCharacters), size };
 }
 
 /**
@@ -230,4 +254,88 @@ export function renderApprovalKey(vm: ApprovalKeyViewModel): string {
 
 	parts.push(text(fit(vm.detail, 16), 118, 16, Palette.textMuted, "400"));
 	return svgToDataUri(frame(parts.join(""), { dimmed: !vm.active }));
+}
+
+/**
+ * Design §14 — the preset a press will run, and what it will send.
+ *
+ * Preset names are user-editable and routinely two words, so the name is wrapped
+ * onto a second line before it is shrunk: "Debug Screen" on one line at a size
+ * that fits a 144px key is smaller than the same name on two.
+ */
+export function renderPromptKey(vm: PromptViewModel): string {
+	const available = SIZE - 16;
+	const lines = wrapLabel(vm.name, available, 26);
+	const longest = lines.reduce((best, line) => (line.length > best.length ? line : best), "");
+	const { size } = fitText(longest, available, 26, 13);
+	const color = vm.available ? Palette.text : Palette.textMuted;
+
+	const parts = [text("PROMPT", 32, 18, Palette.textMuted, "600")];
+	// One line sits on the key's midline; two straddle it.
+	const firstBaseline = lines.length > 1 ? 72 - size * 0.6 : 78;
+	lines.forEach((line, index) => {
+		parts.push(
+			text(
+				fitText(line, available, size, size).value,
+				round(firstBaseline + index * size * 1.15),
+				size,
+				color,
+				"700",
+			),
+		);
+	});
+
+	const detail = fitText(vm.detail, available, 15, 11);
+	parts.push(text(detail.value, 120, detail.size, vm.available ? vm.color : Palette.textMuted, "400"));
+
+	return svgToDataUri(frame(parts.join(""), { dimmed: !vm.available }));
+}
+
+/**
+ * Splits a label onto at most two lines at a word break.
+ *
+ * Only when it needs to: a name that already fits stays on one line, because a
+ * gratuitous wrap reads worse than a slightly narrower one.
+ */
+export function wrapLabel(label: string, maxWidth: number, size: number): string[] {
+	if (estimateWidth(label, size) <= maxWidth) {
+		return [label];
+	}
+	const words = label.split(/\s+/).filter((word) => word.length > 0);
+	if (words.length < 2) {
+		return [label];
+	}
+
+	// The split that leaves the two halves closest in width reads most evenly.
+	let best = { index: 1, difference: Number.POSITIVE_INFINITY };
+	for (let index = 1; index < words.length; index += 1) {
+		const left = words.slice(0, index).join(" ");
+		const right = words.slice(index).join(" ");
+		const difference = Math.abs(left.length - right.length);
+		if (difference < best.difference) {
+			best = { index, difference };
+		}
+	}
+	return [words.slice(0, best.index).join(" "), words.slice(best.index).join(" ")];
+}
+
+/**
+ * Design §13.4 / §22.3 — Push-to-Talk.
+ *
+ * A live microphone is drawn as a filled disc, not a tinted label: §22.3 wants
+ * "recording" to be unmistakable from across a desk, and a colour change alone
+ * is not.
+ */
+export function renderVoiceKey(vm: VoiceViewModel): string {
+	const parts: string[] = [];
+	if (vm.live) {
+		parts.push(`<circle cx="${SIZE / 2}" cy="58" r="26" fill="${vm.color}"/>`);
+	} else {
+		parts.push(`<circle cx="${SIZE / 2}" cy="58" r="26" fill="none" stroke="${vm.color}" stroke-width="6"/>`);
+	}
+	const label = fitText(vm.label, SIZE - 24, 22, 13);
+	parts.push(text(label.value, 108, label.size, Palette.text, "700"));
+	const detail = fitText(vm.detail, SIZE - 16, 14, 10);
+	parts.push(text(detail.value, 130, detail.size, Palette.textMuted, "400"));
+	return svgToDataUri(frame(parts.join(""), { dimmed: !vm.available }));
 }

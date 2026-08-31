@@ -5,13 +5,14 @@ Monitor and control local AI coding agents from an Elgato Stream Deck +.
 AgentDeck is a **controller**, not another AI client. It drives the agents you
 already run — Codex and Claude Code today, others behind the same provider
 interface — so the
-deck answers five questions without a context switch: what is the agent doing,
-how much quota is left, what does the working tree look like, how do I answer the
-approval it is waiting on, and how do I stop it right now.
+deck answers without a context switch: what is the agent doing, how much quota is
+left, what does the working tree look like, how do I answer the approval it is
+waiting on, how do I say the next thing — typed, spoken or pointed at — and how
+do I stop it right now.
 
-![A Stream Deck + running AgentDeck: eight keys showing agent status, stop, approve, deny, usage for two providers, git and project, above a four-segment touch strip](docs/images/deck.svg)
+![A Stream Deck + running AgentDeck: eight keys showing agent status, stop, approve, deny, push-to-talk, a prompt preset, Claude usage and the active project, above a four-segment touch strip](docs/images/deck.svg)
 
-<sub>Eight action types across two providers, with an agent waiting on a high-risk approval: the Approve key shows a hold ring mid-hold, Deny is one press. Below the strip are the segments an encoder can be set to instead, including the AI Overview — providers side by side, never summed. Generated from the shipped renderers by <code>npm run preview</code>.</sub>
+<sub>An agent waiting on a high-risk approval, with the microphone open: the Approve key shows a hold ring mid-hold, Deny is one press, and Push-to-Talk is recording. Below the strip are the segments an encoder can be set to instead, including the AI Overview — providers side by side, never summed. Generated from the shipped renderers by <code>npm run preview</code>.</sub>
 
 - **Design document (source of truth):** [`AGENTDECK_DESIGN.md`](./AGENTDECK_DESIGN.md)
 - **Implementation brief:** [`docs/AGENTDECK_CLAUDE_INSTRUCTIONS.md`](./docs/AGENTDECK_CLAUDE_INSTRUCTIONS.md)
@@ -19,8 +20,12 @@ approval it is waiting on, and how do I stop it right now.
 
 ## Status
 
-Technical Spike and v0.1 Control Core complete. Claude usage (v0.2) and the
-Approval UI and Model / Reasoning selector (v0.4) are in.
+Technical Spike and v0.1 Control Core complete, plus v0.2 (Claude usage, AI
+Overview, Prompt Dial, Clipboard → AI), v0.3 (Push-to-Talk, Voice Steer,
+Screenshot → AI) and the v0.4 Approval UI and Model / Reasoning selector.
+
+Everything that needs a microphone, a display or a foreground window is Windows
+API work that cannot run in CI — see [Voice and screen input](#voice-and-screen-input).
 
 | Spike             | Scope                                                           | State                |
 | ----------------- | --------------------------------------------------------------- | -------------------- |
@@ -115,6 +120,51 @@ Approvals are raised by the client that owns the conversation, so AgentDeck sees
 the ones for turns it starts itself. Starting turns from the deck is v0.3 work;
 until then this path is exercised end to end against the app-server protocol in
 tests, not yet against a turn you began on the deck.
+
+## Prompts
+
+A preset is a template plus where its input comes from and where the result
+goes:
+
+```ts
+interface PromptPreset {
+	id: string;
+	name: string;
+	template: string; // {{input}} is where the capture lands
+	inputSource: "none" | "clipboard" | "selection" | "screenshot";
+	target: "active-session" | "new-session" | "clipboard";
+}
+```
+
+The deck does not get a key per prompt. Set an encoder to the **Prompt** segment
+and rotating selects a preset while pressing runs it, or pin one to a Prompt key.
+The same presets are what Push-to-Talk and Screenshot → AI send through, so there
+is one place that decides what reaches an agent.
+
+Input is captured on the press and never on a timer, and it is capped at 20,000
+characters so a stray Ctrl+A cannot become a multi-megabyte prompt. Nothing that
+was captured — clipboard text, a transcript, an image — is ever written to a log
+line, at any level.
+
+## Voice and screen input
+
+**Push to Talk** records while the key is held and sends the transcript when you
+release it. Recognition is done by Windows' own recogniser on your machine:
+AgentDeck sends no audio anywhere, keeps no recording, and writes neither the
+audio nor the transcript to disk or to the log. The deck shows `LISTENING` for
+exactly as long as the microphone is open, on the key and on the touch strip, and
+releasing the key closes it — there is no toggle that can leave it recording.
+
+**Screenshot → AI** captures the active window (or every screen) and sends it as
+an image alongside the preset's prompt. The file lives in a temporary directory
+that is deleted as soon as the send finishes, whether or not it succeeded.
+
+Both are Windows-only, and both go through PowerShell because Node has no binding
+for the calls they need. That work is confined to `src/adapters/desktop/`, where
+the scripts take their inputs from the environment rather than by string
+interpolation. **Neither has run on real hardware yet**: there is no microphone,
+display or foreground window in CI, so the logic around them is tested and the
+scripts themselves are not. They are on the device checklist.
 
 ## Choosing a model
 
@@ -231,7 +281,7 @@ Both images come from `npm run preview`, which runs the real `key-renderer` and
 ```text
 Presentation  actions/ · presentation/
      ↓
-Application   usage · session · git · project · approval · model · registry
+Application   usage · session · git · project · approval · model · prompt · voice
      ↓
 Domain        project · session · usage · approval · model · errors
      ↑
@@ -258,6 +308,11 @@ Two rules hold everywhere and are enforced by lint, not just by convention:
 - Every log line passes through a redactor. OAuth tokens, API keys, `Authorization`
   headers, full prompts and clipboard contents never reach a log file, at any
   level — including debug.
+- Voice recognition is local. No audio and no transcript leaves the machine, and
+  neither is written to disk or to a log.
+- Captures are user-initiated. Nothing reads the clipboard, the screen or the
+  microphone on a timer, and a screenshot's temporary file is deleted as soon as
+  the send finishes.
 - No telemetry.
 
 ## Licence

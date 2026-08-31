@@ -11,6 +11,7 @@ import { AgentDeckError } from "../domain/errors.js";
 import { isInterruptible, pickActiveSession, type AgentSession } from "../domain/session.js";
 import type { ProviderId } from "../domain/usage.js";
 import type { Logger } from "../infrastructure/logger.js";
+import type { AgentInput, AgentProvider } from "../providers/provider.js";
 import type { ProviderRegistry } from "./provider-registry.js";
 
 export type SessionListener = (sessions: readonly AgentSession[]) => void;
@@ -120,6 +121,42 @@ export class SessionService {
 			throw new AgentDeckError("PROTOCOL_ERROR", `Provider ${session.providerId} cannot interrupt.`);
 		}
 		await provider.interrupt(session.id);
+	}
+
+	/**
+	 * Design §12.3 — sends input to the session the deck is following.
+	 *
+	 * With no session to send to, this opens one only when the caller asked for
+	 * it: a Prompt key set to "active session" should report that there is none
+	 * rather than quietly starting a conversation the user did not ask for.
+	 */
+	public async send(
+		input: AgentInput,
+		options: { providerId?: ProviderId; target?: "active-session" | "new-session"; cwd?: string } = {},
+	): Promise<AgentSession> {
+		const providerId = options.providerId;
+		const provider = providerId === undefined ? undefined : this.#registry.get(providerId);
+		if (provider === undefined || provider.steer === undefined) {
+			throw new AgentDeckError("PROTOCOL_ERROR", `Provider ${providerId ?? "(none)"} cannot be sent input.`);
+		}
+
+		const session =
+			options.target === "new-session"
+				? await this.#startSession(provider, options.cwd)
+				: (this.getActiveSession(providerId) ?? (await this.#startSession(provider, options.cwd)));
+
+		await provider.steer(session.id, input);
+		return session;
+	}
+
+	async #startSession(provider: AgentProvider, cwd: string | undefined): Promise<AgentSession> {
+		if (provider.startSession === undefined) {
+			throw new AgentDeckError("PROTOCOL_ERROR", `Provider ${provider.id} cannot start a session.`);
+		}
+		const session = await provider.startSession(cwd === undefined ? {} : { cwd });
+		this.#sessions.set(this.#key(session), session);
+		this.#notify();
+		return session;
 	}
 
 	public dispose(): void {

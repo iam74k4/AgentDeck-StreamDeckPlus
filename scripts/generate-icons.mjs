@@ -193,6 +193,26 @@ const GLYPHS = {
 		canvas.circle(0.5, 0.5, 0.29, PALETTE.background);
 		canvas.roundedRect(0.28, 0.46, 0.44, 0.08, 0.04, PALETTE.danger);
 	},
+	prompt(canvas) {
+		// A speech bubble: the deck saying something to the agent.
+		canvas.roundedRect(0.12, 0.2, 0.76, 0.46, 0.1, PALETTE.accent);
+		canvas.roundedRect(0.24, 0.66, 0.16, 0.14, 0.04, PALETTE.accent);
+		canvas.roundedRect(0.24, 0.32, 0.52, 0.06, 0.03, PALETTE.background);
+		canvas.roundedRect(0.24, 0.46, 0.34, 0.06, 0.03, PALETTE.background);
+	},
+	voice(canvas) {
+		// A microphone: capsule, stand and base.
+		canvas.roundedRect(0.4, 0.16, 0.2, 0.4, 0.1, PALETTE.danger);
+		canvas.roundedRect(0.47, 0.56, 0.06, 0.16, 0.03, PALETTE.muted);
+		canvas.roundedRect(0.32, 0.72, 0.36, 0.07, 0.035, PALETTE.muted);
+	},
+	screenshot(canvas) {
+		// A frame with a corner cut out: capture, not a photograph.
+		canvas.roundedRect(0.14, 0.22, 0.72, 0.56, 0.08, PALETTE.muted);
+		canvas.roundedRect(0.2, 0.28, 0.6, 0.44, 0.05, PALETTE.background);
+		canvas.roundedRect(0.28, 0.38, 0.3, 0.06, 0.03, PALETTE.accent);
+		canvas.roundedRect(0.28, 0.5, 0.44, 0.06, 0.03, PALETTE.accent);
+	},
 	usage(canvas) {
 		canvas.roundedRect(0.16, 0.54, 0.16, 0.3, 0.05, PALETTE.ok);
 		canvas.roundedRect(0.42, 0.36, 0.16, 0.48, 0.05, PALETTE.warn);
@@ -241,7 +261,20 @@ function write(relativePath, buffer) {
 	return target;
 }
 
-const ACTIONS = ["agent", "stop", "approve", "deny", "usage", "git", "project", "launcher", "dashboard"];
+const ACTIONS = [
+	"agent",
+	"stop",
+	"approve",
+	"deny",
+	"prompt",
+	"voice",
+	"screenshot",
+	"usage",
+	"git",
+	"project",
+	"launcher",
+	"dashboard",
+];
 
 write("plugin/icon.png", render("plugin", 288, false));
 write("plugin/icon@2x.png", render("plugin", 576, false));

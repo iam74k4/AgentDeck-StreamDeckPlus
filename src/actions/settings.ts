@@ -50,6 +50,31 @@ export interface ApprovalActionSettings {
 	[key: string]: SettingsValue;
 }
 
+export interface PromptActionSettings {
+	/** Empty follows the Prompt dial's selection. */
+	presetId?: string;
+	providerId?: string;
+	/** A fixed prompt typed into the inspector; replaces the preset's input source. */
+	text?: string;
+	[key: string]: SettingsValue;
+}
+
+export interface VoiceActionSettings {
+	/** Preset the transcript is sent through; empty follows the Prompt dial. */
+	presetId?: string;
+	providerId?: string;
+	[key: string]: SettingsValue;
+}
+
+export interface ScreenshotActionSettings {
+	/** Defaults to the Explain Screen preset. */
+	presetId?: string;
+	providerId?: string;
+	/** Design §15.1 — Selected Region is future work. */
+	captureMode?: "active-window" | "full-screen";
+	[key: string]: SettingsValue;
+}
+
 export interface GitActionSettings {
 	repositoryPath?: string;
 	[key: string]: SettingsValue;

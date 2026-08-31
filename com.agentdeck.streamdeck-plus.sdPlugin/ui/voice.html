@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<title>Push to Talk</title>
+		<link rel="stylesheet" href="lib/pi.css" />
+	</head>
+	<body>
+		<h1>Push to Talk</h1>
+		<div class="row">
+			<label for="preset">Send through</label>
+			<select id="preset" data-setting="presetId">
+				<option value="">Follow the Prompt dial</option>
+				<option value="custom">Custom (send as spoken)</option>
+				<option value="explain">Explain</option>
+				<option value="review">Review</option>
+				<option value="refactor">Refactor</option>
+				<option value="test">Test</option>
+				<option value="security">Security</option>
+				<option value="performance">Performance</option>
+			</select>
+		</div>
+		<p class="hint">
+			What you say becomes the preset's input, so the preset decides the framing and where it goes — the
+			active session, a new one, or the clipboard.
+		</p>
+		<div class="row">
+			<label for="provider">Provider</label>
+			<select id="provider" data-setting="providerId">
+				<option value="">Default (Codex)</option>
+				<option value="codex">Codex</option>
+			</select>
+		</div>
+		<fieldset>
+			<legend>Privacy</legend>
+			<p class="hint">
+				Recognition is done by <strong>Windows' own speech recogniser, on this machine</strong>. No audio and
+				no transcript is sent anywhere by AgentDeck, and nothing is written to disk or to the log. Only the
+				recognised text reaches the agent you send it to.
+			</p>
+			<p class="hint">
+				The key records only while it is held, and the deck shows <code>LISTENING</code> the whole time.
+				Releasing the key stops the microphone.
+			</p>
+		</fieldset>
+		<script src="lib/pi.js"></script>
+	</body>
+</html>

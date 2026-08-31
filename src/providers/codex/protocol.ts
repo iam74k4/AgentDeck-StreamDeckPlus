@@ -28,6 +28,9 @@ export const CodexMethod = {
 	TurnInterrupt: "turn/interrupt",
 	ModelList: "model/list",
 	ThreadSettingsUpdate: "thread/settings/update",
+	ThreadStart: "thread/start",
+	TurnStart: "turn/start",
+	TurnSteer: "turn/steer",
 } as const;
 
 /** Notifications this plugin subscribes to (design §9.3, §20.1). */
@@ -154,6 +157,42 @@ export interface WireModel {
 
 export interface WireModelListResponse {
 	data?: WireModel[] | null;
+}
+
+/**
+ * `UserInput` — internally tagged on `type` (openai/codex `UserInput`).
+ *
+ * Only the two variants AgentDeck can produce: typed or spoken text, and a
+ * screenshot it just took. The rest exist on the wire and are deliberately not
+ * modelled, because nothing here can construct them.
+ */
+export type WireUserInput = { type: "text"; text: string } | { type: "localImage"; path: string };
+
+export interface WireTurnStartParams {
+	threadId: string;
+	input: WireUserInput[];
+}
+
+/**
+ * `TurnSteerParams` — `expectedTurnId` is a required precondition: the request
+ * fails rather than steering a turn that has moved on since the deck last looked.
+ */
+export interface WireTurnSteerParams {
+	threadId: string;
+	input: WireUserInput[];
+	expectedTurnId: string;
+}
+
+export interface WireThreadStartParams {
+	cwd?: string;
+}
+
+export interface WireTurnStartResponse {
+	turn?: WireTurn | null;
+}
+
+export interface WireThreadStartResponse {
+	thread?: WireThread | null;
 }
 
 /**

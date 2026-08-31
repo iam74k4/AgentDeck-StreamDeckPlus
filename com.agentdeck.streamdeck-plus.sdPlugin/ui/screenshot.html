@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<title>Screenshot to AI</title>
+		<link rel="stylesheet" href="lib/pi.css" />
+	</head>
+	<body>
+		<h1>Screenshot to AI</h1>
+		<div class="row">
+			<label for="mode">Capture</label>
+			<select id="mode" data-setting="captureMode">
+				<option value="active-window">Active window</option>
+				<option value="full-screen">All screens</option>
+			</select>
+		</div>
+		<div class="row">
+			<label for="preset">Preset</label>
+			<select id="preset" data-setting="presetId">
+				<option value="explain-screen">Explain Screen</option>
+				<option value="debug-screen">Debug Screen</option>
+				<option value="review-ui">Review UI</option>
+			</select>
+		</div>
+		<div class="row">
+			<label for="provider">Provider</label>
+			<select id="provider" data-setting="providerId">
+				<option value="">Default (Codex)</option>
+				<option value="codex">Codex</option>
+			</select>
+		</div>
+		<fieldset>
+			<legend>Privacy</legend>
+			<p class="hint">
+				The capture happens on the press and nowhere else. AgentDeck writes it to a temporary file, hands the
+				path to the agent, and deletes it as soon as the send finishes — whether or not the send worked. No
+				copy is kept, and the image never reaches a log file.
+			</p>
+			<p class="hint">
+				The image goes to the provider you pick, so it leaves this machine exactly as far as that provider
+				takes it. Capture the active window rather than all screens when other windows are open.
+			</p>
+			<p class="hint">Windows only.</p>
+		</fieldset>
+		<script src="lib/pi.js"></script>
+	</body>
+</html>

@@ -17,6 +17,7 @@ import {
 	renderAgentSegment,
 	renderGitSegment,
 	renderModelSegment,
+	renderPromptSegment,
 	renderOverviewSegment,
 	renderProjectSegment,
 	renderProviderSegment,
@@ -27,12 +28,23 @@ import type { GitViewModel } from "./view-models/git.js";
 import type { ModelViewModel } from "./view-models/model.js";
 import type { OverviewViewModel } from "./view-models/overview.js";
 import type { ProjectViewModel } from "./view-models/project.js";
+import type { PromptViewModel } from "./view-models/prompt.js";
+import type { VoiceViewModel } from "./view-models/voice.js";
 import type { ProviderViewModel } from "./view-models/provider.js";
 import type { UsageViewModel } from "./view-models/usage.js";
 
 export type DeviceId = string;
 export type Column = 0 | 1 | 2 | 3;
-export const SEGMENT_KINDS = ["usage", "agent", "model", "git", "project", "overview", "provider"] as const;
+export const SEGMENT_KINDS = [
+	"usage",
+	"agent",
+	"model",
+	"prompt",
+	"git",
+	"project",
+	"overview",
+	"provider",
+] as const;
 export type SegmentKind = (typeof SEGMENT_KINDS)[number];
 
 export type DashboardMode = "dashboard" | "standalone";
@@ -62,6 +74,8 @@ export interface DashboardData {
 	agent: AgentStatusViewModel;
 	git: GitViewModel;
 	model: ModelViewModel;
+	prompt: PromptViewModel;
+	voice: VoiceViewModel;
 	overview: OverviewViewModel;
 	project: ProjectViewModel;
 	provider: ProviderViewModel;
@@ -190,6 +204,8 @@ export function renderSegment(kind: SegmentKind, data: DashboardData): SegmentFe
 			return renderGitSegment(data.git);
 		case "model":
 			return renderModelSegment(data.model);
+		case "prompt":
+			return renderPromptSegment(data.prompt, data.voice);
 		case "overview":
 			return renderOverviewSegment(data.overview);
 		case "project":

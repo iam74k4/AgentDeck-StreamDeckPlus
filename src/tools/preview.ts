@@ -9,6 +9,7 @@
 
 import type { ApprovalRequest } from "../domain/approval.js";
 import type { ModelState } from "../application/model-service.js";
+import { DEFAULT_PROMPT_PRESETS } from "../domain/prompt.js";
 import type { AgentSessionState } from "../domain/session.js";
 import type { ProviderOverviewEntry } from "../application/usage-service.js";
 import type { UsageSnapshot } from "../domain/usage.js";
@@ -17,6 +18,8 @@ import {
 	renderAgentStatusKey,
 	renderApprovalKey,
 	renderGitKey,
+	renderPromptKey,
+	renderVoiceKey,
 	renderLauncherKey,
 	renderProjectKey,
 	renderStopKey,
@@ -26,6 +29,7 @@ import {
 	renderAgentSegment,
 	renderGitSegment,
 	renderModelSegment,
+	renderPromptSegment,
 	renderOverviewSegment,
 	renderProjectSegment,
 	renderProviderSegment,
@@ -35,6 +39,8 @@ import {
 import { buildAgentStatusViewModel } from "../presentation/view-models/agent-status.js";
 import { buildApproveKeyViewModel, buildDenyKeyViewModel } from "../presentation/view-models/approval.js";
 import { buildGitViewModel } from "../presentation/view-models/git.js";
+import { buildPromptViewModel } from "../presentation/view-models/prompt.js";
+import { buildVoiceViewModel } from "../presentation/view-models/voice.js";
 import { buildModelViewModel } from "../presentation/view-models/model.js";
 import { buildOverviewViewModel } from "../presentation/view-models/overview.js";
 import { buildProjectViewModel } from "../presentation/view-models/project.js";
@@ -175,6 +181,14 @@ const MODEL_STATE: ModelState = {
 	error: undefined,
 };
 
+function presetNamed(name: string) {
+	const preset = DEFAULT_PROMPT_PRESETS.find((candidate) => candidate.name === name);
+	if (preset === undefined) {
+		throw new Error(`no default preset called ${name}`);
+	}
+	return preset;
+}
+
 function session(state: AgentSessionState, startedMsAgo?: number) {
 	return {
 		id: "thr_1",
@@ -253,28 +267,25 @@ export function renderDeckPreview(layout: SegmentLayout): string {
 	const dialY = stripY + SEGMENT_HEIGHT + 26;
 	const altY = dialY + 78;
 	const height = altY + SEGMENT_HEIGHT + 24 + PAD;
-	const width = CONTENT + PAD * 2;
+	// Room to the right of the strip for the keys that are not on the sheet above.
+	const width = CONTENT + PAD * 2 + 140;
 
 	const keys = [
-		// Row 1 — control: what the agent is doing, and the three answers to it.
+		// Row 1 — control: what the agent is doing, and the answers to it.
 		agentKey({ providerLabel: "Codex", providerStatus: "ready", session: session("waiting-approval") }),
 		renderStopKey(true),
 		// A high-risk request, so the Approve key shows the hold ring mid-hold.
 		renderApprovalKey(buildApproveKeyViewModel({ request: APPROVAL_HIGH_RISK, holdProgress: 0.55 })),
 		renderApprovalKey(buildDenyKeyViewModel({ request: APPROVAL_HIGH_RISK })),
-		// Row 2 — context: both providers' usage, the repository and the project.
-		usageKey({
-			providerLabel: "Codex",
-			snapshot: snapshot(),
-			selection: { mode: "pinned", windowId: "codex.primary" },
-		}),
+		// Row 2 — input and context: what you send, and what you send it about.
+		renderVoiceKey(buildVoiceViewModel({ state: "listening" })),
+		renderPromptKey(buildPromptViewModel({ preset: presetNamed("Debug Screen") })),
 		usageKey({
 			providerLabel: "Claude",
 			snapshot: claudeSnapshot(),
 			selection: { mode: "pinned", windowId: "claude.seven_day" },
 			showResetAt: true,
 		}),
-		renderGitKey(REPO_STATUS),
 		renderProjectKey(
 			buildProjectViewModel({
 				active: { id: "p1", name: "agentdeck", path: "/src/agentdeck" },
@@ -336,17 +347,18 @@ export function renderDeckPreview(layout: SegmentLayout): string {
 		}),
 		// Segments and keys are per-action settings; these are the alternatives to
 		// the defaults above.
-		label("OTHER SEGMENTS", PAD + (SEGMENT_WIDTH * 3) / 2, altY - 12, 10, "#4a4d52"),
+		label("OTHER SEGMENTS", PAD + SEGMENT_WIDTH * 2, altY - 12, 10, "#4a4d52"),
 		`<g transform="translate(${PAD},${altY})">`,
-		`<rect x="-4" y="-4" width="${SEGMENT_WIDTH * 3 + 8}" height="${SEGMENT_HEIGHT + 8}" rx="10" fill="#0b0c0e"/>`,
+		`<rect x="-4" y="-4" width="${SEGMENT_WIDTH * 4 + 8}" height="${SEGMENT_HEIGHT + 8}" rx="10" fill="#0b0c0e"/>`,
 		`<g>${drawSegment(layout, renderGitSegment(REPO_STATUS))}</g>`,
-		`<g transform="translate(${SEGMENT_WIDTH},0)">${drawSegment(layout, renderOverviewSegment(buildOverviewViewModel(OVERVIEW)))}</g>`,
-		`<g transform="translate(${SEGMENT_WIDTH * 2},0)">${drawSegment(layout, renderProviderSegment(buildProviderViewModel({ label: "Codex", status: "ready" })))}</g>`,
+		`<g transform="translate(${SEGMENT_WIDTH},0)">${drawSegment(layout, renderPromptSegment(buildPromptViewModel({ preset: presetNamed("Review"), index: 1, total: DEFAULT_PROMPT_PRESETS.length })))}</g>`,
+		`<g transform="translate(${SEGMENT_WIDTH * 2},0)">${drawSegment(layout, renderOverviewSegment(buildOverviewViewModel(OVERVIEW)))}</g>`,
+		`<g transform="translate(${SEGMENT_WIDTH * 3},0)">${drawSegment(layout, renderProviderSegment(buildProviderViewModel({ label: "Codex", status: "ready" })))}</g>`,
 		`</g>`,
-		label("OTHER KEYS", PAD + SEGMENT_WIDTH * 3 + 90, altY - 12, 10, "#4a4d52"),
+		label("OTHER KEYS", PAD + CONTENT + 70, altY - 12, 10, "#4a4d52"),
 		placeKey(
 			renderLauncherKey({ name: "VS Code", detail: "agentdeck", installed: true }),
-			PAD + SEGMENT_WIDTH * 3 + 36,
+			PAD + CONTENT + 20,
 			altY,
 			SEGMENT_HEIGHT,
 		),
@@ -466,6 +478,17 @@ export function renderStatePreview(): string {
 			key: renderApprovalKey(buildDenyKeyViewModel({ request: APPROVAL_HIGH_RISK })),
 			caption: "DENY",
 			note: "always one press",
+		},
+		// Design §22.3 — recording must be unmistakable, and its absence checkable.
+		{
+			key: renderVoiceKey(buildVoiceViewModel({ state: "idle", presetName: "Custom" })),
+			caption: "MIC",
+			note: "not recording",
+		},
+		{
+			key: renderVoiceKey(buildVoiceViewModel({ state: "listening" })),
+			caption: "LISTENING",
+			note: "microphone is open",
 		},
 	];
 

@@ -26,6 +26,9 @@ const { DashboardEncoderAction, cycleSegment, windowSelectionOf } =
 	await import("@/actions/dashboard-encoder-action.js");
 const { ApproveAction, holdDurationMs } = await import("@/actions/approve-action.js");
 const { DenyAction } = await import("@/actions/deny-action.js");
+const { PromptAction } = await import("@/actions/prompt-action.js");
+const { VoiceAction } = await import("@/actions/voice-action.js");
+const { ScreenshotAction, captureMode } = await import("@/actions/screenshot-action.js");
 const { createFakeRuntime, usageSnapshot } = await import("../helpers/fake-runtime.js");
 const { renderStopKey } = await import("@/presentation/renderers/key-renderer.js");
 
@@ -563,5 +566,184 @@ describe("model dial (design §19)", () => {
 
 		expect(dial.lastTitle).toBe("MODEL");
 		expect(dial.feedback[dial.feedback.length - 1]?.detail?.value).toBe("unavailable");
+	});
+});
+
+describe("prompt key and dial (design §14)", () => {
+	const dialDown = (action: unknown, settings: object, column: number): never =>
+		({ action, payload: { settings: { ...settings }, coordinates: { column, row: 0 } } }) as never;
+
+	it("names the preset it will run and what it will send", () => {
+		const action = new PromptAction(fake.runtime);
+		const key = new FakeKey();
+
+		action.onWillAppear(appear(key, { presetId: "review" }));
+
+		expect(key.lastImage).toContain("Review");
+		expect(key.lastImage).toContain("clipboard");
+	});
+
+	it("runs the preset on press", async () => {
+		const action = new PromptAction(fake.runtime);
+		const key = new FakeKey();
+		fake.provider.pushSession({ id: "thr_1", providerId: "codex", state: "idle", updatedAt: new Date() });
+		action.onWillAppear(appear(key, { presetId: "explain" }));
+
+		await action.onKeyDown(appear(key, { presetId: "explain" }));
+
+		expect(fake.provider.steered[0]?.input.text).toContain("copied text");
+		expect(key.okCount).toBe(1);
+	});
+
+	it("alerts rather than sending when there is nothing to send", async () => {
+		const action = new PromptAction(fake.runtime);
+		const key = new FakeKey();
+		fake.captured.clipboard = "";
+		fake.runtime.prompts.setPresets([
+			{
+				id: "custom",
+				name: "Custom",
+				template: "{{input}}",
+				inputSource: "clipboard",
+				target: "active-session",
+			},
+		]);
+
+		await action.onKeyDown(appear(key, { presetId: "custom" }));
+
+		expect(fake.provider.steered).toEqual([]);
+		expect(key.alertCount).toBe(1);
+	});
+
+	it("rotating the prompt dial selects without sending", async () => {
+		const action = new DashboardEncoderAction(fake.runtime);
+		const dial = new FakeDial();
+		await action.onWillAppear(appear(dial, { segment: "prompt" }, 0));
+
+		await action.onDialRotate(rotate(dial, { segment: "prompt" }, 1, 0));
+
+		expect(fake.runtime.prompts.selected?.id).toBe("review");
+		expect(fake.provider.steered).toEqual([]);
+		// The selection is session state, not a stored key setting.
+		expect(dial.settings.segment).toBeUndefined();
+	});
+
+	it("pressing the prompt dial runs the selected preset", async () => {
+		const action = new DashboardEncoderAction(fake.runtime);
+		const dial = new FakeDial();
+		fake.provider.pushSession({ id: "thr_1", providerId: "codex", state: "idle", updatedAt: new Date() });
+		await action.onWillAppear(appear(dial, { segment: "prompt" }, 0));
+
+		await action.onDialDown(dialDown(dial, { segment: "prompt" }, 0));
+
+		expect(fake.provider.steered).toHaveLength(1);
+	});
+});
+
+describe("push-to-talk key (design §13.4, §22.3)", () => {
+	const keyUp = (action: unknown, settings: object): never =>
+		({ action, payload: { settings: { ...settings } } }) as never;
+
+	it("says MIC when idle and LISTENING while held", async () => {
+		const action = new VoiceAction(fake.runtime);
+		const key = new FakeKey();
+		action.onWillAppear(appear(key, {}));
+		expect(key.lastImage).toContain("MIC");
+
+		await action.onKeyDown(appear(key, {}));
+
+		expect(key.lastImage).toContain("LISTENING");
+		expect(fake.captured.recording).toBe(true);
+	});
+
+	it("sends the transcript on release and returns to MIC", async () => {
+		const action = new VoiceAction(fake.runtime);
+		const key = new FakeKey();
+		fake.provider.pushSession({ id: "thr_1", providerId: "codex", state: "idle", updatedAt: new Date() });
+		action.onWillAppear(appear(key, { presetId: "custom" }));
+
+		await action.onKeyDown(appear(key, { presetId: "custom" }));
+		await action.onKeyUp(keyUp(key, { presetId: "custom" }));
+
+		expect(fake.provider.steered[0]?.input.text).toBe("check the parser");
+		expect(fake.captured.recording).toBe(false);
+		expect(key.lastImage).toContain("MIC");
+		expect(key.okCount).toBe(1);
+	});
+
+	it("alerts rather than sending an empty turn after silence", async () => {
+		const action = new VoiceAction(fake.runtime);
+		const key = new FakeKey();
+		fake.captured.transcript = "";
+		action.onWillAppear(appear(key, { presetId: "custom" }));
+
+		await action.onKeyDown(appear(key, { presetId: "custom" }));
+		await action.onKeyUp(keyUp(key, { presetId: "custom" }));
+
+		expect(fake.provider.steered).toEqual([]);
+		expect(key.alertCount).toBe(1);
+	});
+
+	it("closes the microphone if the key disappears mid-recording", async () => {
+		const action = new VoiceAction(fake.runtime);
+		const key = new FakeKey();
+		action.onWillAppear(appear(key, {}));
+		await action.onKeyDown(appear(key, {}));
+		expect(fake.captured.recording).toBe(true);
+
+		action.onWillDisappear(appear(key, {}));
+		await Promise.resolve();
+
+		expect(fake.captured.recording).toBe(false);
+	});
+
+	it("shows LISTENING on the touch strip while the key is held (design §13.4)", async () => {
+		const encoder = new DashboardEncoderAction(fake.runtime);
+		const dial = new FakeDial();
+		await encoder.onWillAppear(appear(dial, { segment: "prompt" }, 0));
+		const action = new VoiceAction(fake.runtime);
+		const key = new FakeKey();
+
+		await action.onKeyDown(appear(key, {}));
+
+		expect(dial.lastTitle).toBe("VOICE");
+		expect(dial.lastValue).toBe("LISTENING");
+	});
+});
+
+describe("screenshot key (design §15.1, §22.4)", () => {
+	it("defaults to the active window, and offers no region mode", () => {
+		expect(captureMode({})).toBe("active-window");
+		expect(captureMode({ captureMode: "full-screen" })).toBe("full-screen");
+		// Design §15.1 lists Selected Region as future work; anything unknown falls
+		// back to the narrower capture rather than grabbing every screen.
+		expect(captureMode({ captureMode: "selected-region" } as never)).toBe("active-window");
+	});
+
+	it("captures and sends the image, then leaves nothing on disk", async () => {
+		const action = new ScreenshotAction(fake.runtime);
+		const key = new FakeKey();
+		fake.provider.pushSession({ id: "thr_1", providerId: "codex", state: "idle", updatedAt: new Date() });
+
+		await action.onKeyDown(appear(key, { captureMode: "full-screen" }));
+
+		expect(fake.captured.captures).toEqual(["full-screen"]);
+		expect(fake.provider.steered[0]?.input.imagePaths).toHaveLength(1);
+		expect(fake.provider.steered[0]?.input.text).toContain("Explain what is on this screen");
+		// Design §22.4 — the temporary file does not outlive the send.
+		expect(fake.captured.liveShots.size).toBe(0);
+		expect(key.okCount).toBe(1);
+	});
+
+	it("names the preset it will send", () => {
+		const action = new ScreenshotAction(fake.runtime);
+		const key = new FakeKey();
+
+		action.onWillAppear(appear(key, { presetId: "debug-screen" }));
+
+		// "Debug Screen" is wrapped onto two lines rather than truncated.
+		expect(key.lastImage).toContain(">Debug<");
+		expect(key.lastImage).toContain(">Screen<");
+		expect(key.lastImage).toContain("screen → agent");
 	});
 });

@@ -168,6 +168,25 @@ function handle(message) {
 				turn: { id: params?.turnId, status: "interrupted" },
 			});
 			return;
+		case "thread/start":
+			// Logged before the response, so a test that awaits the call can read it.
+			if (process.env.FAKE_ANSWER_LOG !== undefined) {
+				appendFileSync(process.env.FAKE_ANSWER_LOG, `${JSON.stringify({ method, params })}\n`);
+			}
+			write({ id, result: { thread: { id: "thr_new", status: { type: "idle" }, createdAt: 1700000001 } } });
+			return;
+		case "turn/start":
+			if (process.env.FAKE_ANSWER_LOG !== undefined) {
+				appendFileSync(process.env.FAKE_ANSWER_LOG, `${JSON.stringify({ method, params })}\n`);
+			}
+			write({ id, result: { turn: { id: "turn_started", status: "inProgress" } } });
+			return;
+		case "turn/steer":
+			if (process.env.FAKE_ANSWER_LOG !== undefined) {
+				appendFileSync(process.env.FAKE_ANSWER_LOG, `${JSON.stringify({ method, params })}\n`);
+			}
+			write({ id, result: {} });
+			return;
 		case "thread/settings/update":
 			if (process.env.FAKE_ANSWER_LOG !== undefined) {
 				appendFileSync(process.env.FAKE_ANSWER_LOG, `${JSON.stringify({ method, params })}\n`);

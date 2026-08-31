@@ -19,7 +19,11 @@ import {
 	type WireThread,
 	type WireThreadListResponse,
 	type WireThreadSettingsUpdateParams,
+	type WireThreadStartResponse,
 	type WireTurn,
+	type WireTurnStartParams,
+	type WireTurnStartResponse,
+	type WireTurnSteerParams,
 } from "./protocol.js";
 
 export interface AppServerClientOptions {
@@ -108,6 +112,21 @@ export class AppServerClient {
 
 	public interruptTurn(threadId: string, turnId: string): Promise<unknown> {
 		return this.#call<unknown>(CodexMethod.TurnInterrupt, { threadId, turnId });
+	}
+
+	/** Design §12.3 — starts a turn with the given input on an idle thread. */
+	public startTurn(params: WireTurnStartParams): Promise<WireTurnStartResponse> {
+		return this.#call<WireTurnStartResponse>(CodexMethod.TurnStart, params);
+	}
+
+	/** Design §12.3 — adds input to a turn that is already running. */
+	public steerTurn(params: WireTurnSteerParams): Promise<unknown> {
+		return this.#call<unknown>(CodexMethod.TurnSteer, params);
+	}
+
+	/** Opens a thread, optionally rooted at the active project (design §7.4). */
+	public startThread(cwd?: string): Promise<WireThreadStartResponse> {
+		return this.#call<WireThreadStartResponse>(CodexMethod.ThreadStart, cwd === undefined ? {} : { cwd });
 	}
 
 	/** Design §19 — applies a model / reasoning choice to subsequent turns. */

@@ -26,7 +26,7 @@ import {
 	type ProcessExit,
 } from "../../infrastructure/process-manager.js";
 import { scheduleInterval, type ScheduledTask } from "../../infrastructure/scheduler.js";
-import type { AgentProvider, ProviderLifecycleState } from "../provider.js";
+import type { AgentInput, AgentProvider, ProviderLifecycleState } from "../provider.js";
 import { AppServerClient } from "./app-server-client.js";
 import { parseApprovalRequest, toApprovalResponse } from "./approval-mapper.js";
 import { JsonRpcTransport } from "./json-rpc.js";
@@ -39,6 +39,7 @@ import {
 	threadStatusToSessionState,
 	toUsageWindows,
 	turnStatusToSessionState,
+	toWireUserInput,
 	wireModelToDescriptor,
 	wireThreadToSession,
 	type CodexRateLimitState,
@@ -325,6 +326,55 @@ export class CodexProvider implements AgentProvider {
 		return (response.data ?? [])
 			.filter((model): model is NonNullable<typeof model> => model !== null && model !== undefined)
 			.map(wireModelToDescriptor);
+	}
+
+	/**
+	 * Design §12.3 — sends input to a session.
+	 *
+	 * A turn already running is steered; an idle thread gets a new turn. Steering
+	 * carries `expectedTurnId`, so a turn that finished between the deck reading
+	 * the state and the request arriving fails the precondition rather than
+	 * silently landing somewhere else.
+	 */
+	public async steer(sessionId: string, input: AgentInput): Promise<void> {
+		const client = this.#requireClient();
+		const wireInput = toWireUserInput(input);
+		if (wireInput.length === 0) {
+			throw new AgentDeckError("PROTOCOL_ERROR", "There is nothing to send.");
+		}
+
+		const turnId = this.#sessions.get(sessionId)?.currentTurnId;
+		if (turnId !== undefined) {
+			await client.steerTurn({ threadId: sessionId, input: wireInput, expectedTurnId: turnId });
+			return;
+		}
+		const response = await client.startTurn({ threadId: sessionId, input: wireInput });
+		const turn = response.turn;
+		const existing = this.#sessions.get(sessionId);
+		const now = new Date();
+		this.#upsertSession(
+			{
+				...(existing ?? { id: sessionId, providerId: this.id, state: "working", updatedAt: now }),
+				state: "working",
+				...(turn?.id === undefined ? {} : { currentTurnId: turn.id }),
+				startedAt: now,
+				updatedAt: now,
+			},
+			{ emit: true },
+		);
+	}
+
+	/** Opens a thread, rooted at the given directory when one is supplied. */
+	public async startSession(options: { cwd?: string } = {}): Promise<AgentSession> {
+		const client = this.#requireClient();
+		const response = await client.startThread(options.cwd ?? this.#options.projectPath);
+		const thread = response.thread;
+		if (thread === null || thread === undefined || typeof thread.id !== "string") {
+			throw new AgentDeckError("PROTOCOL_ERROR", "The app-server did not return a thread.");
+		}
+		const session = wireThreadToSession(thread, this.id);
+		this.#upsertSession(session, { emit: true });
+		return session;
 	}
 
 	/** Design §19 — applies the selector's choice to a session's later turns. */

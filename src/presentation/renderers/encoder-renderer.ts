@@ -13,6 +13,8 @@ import type { GitViewModel } from "../view-models/git.js";
 import type { ModelViewModel } from "../view-models/model.js";
 import type { OverviewViewModel } from "../view-models/overview.js";
 import type { ProjectViewModel } from "../view-models/project.js";
+import type { PromptViewModel } from "../view-models/prompt.js";
+import type { VoiceViewModel } from "../view-models/voice.js";
 import type { ProviderViewModel } from "../view-models/provider.js";
 import type { UsageViewModel } from "../view-models/usage.js";
 import { Palette } from "../view-models/colors.js";
@@ -111,6 +113,21 @@ export function renderOverviewSegment(vm: OverviewViewModel): SegmentFeedback {
 /** Design §6.1 — the MODEL column of the default touch strip. */
 export function renderModelSegment(vm: ModelViewModel): SegmentFeedback {
 	return segment("MODEL", fit(vm.title, 14), fit(vm.detail, 20), vm.color);
+}
+
+/**
+ * Design §6.1 dial 3 — rotate selects a preset, press runs it.
+ *
+ * While the microphone is open this segment shows LISTENING instead: design
+ * §13.4 puts that on the touch strip, and the prompt segment is where the
+ * transcript is about to go.
+ */
+export function renderPromptSegment(vm: PromptViewModel, voice?: VoiceViewModel): SegmentFeedback {
+	if (voice?.live === true) {
+		return segment("VOICE", voice.label, fit(voice.detail, 22), voice.color);
+	}
+	const title = vm.position.length > 0 ? `PROMPT ${vm.position}` : "PROMPT";
+	return segment(title, fit(vm.name, 14), fit(vm.detail, 22), vm.color);
 }
 
 export function renderProjectSegment(vm: ProjectViewModel): SegmentFeedback {

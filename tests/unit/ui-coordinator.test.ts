@@ -7,6 +7,8 @@ import { GitService } from "@/application/git-service.js";
 import { ProjectService } from "@/application/project-service.js";
 import { ApprovalService } from "@/application/approval-service.js";
 import { ModelService } from "@/application/model-service.js";
+import { PromptService } from "@/application/prompt-service.js";
+import { VoiceService } from "@/application/voice-service.js";
 import { ProviderRegistry } from "@/application/provider-registry.js";
 import { SessionService } from "@/application/session-service.js";
 import { UsageService } from "@/application/usage-service.js";
@@ -32,8 +34,10 @@ function setup(): { ui: UiCoordinator; provider: ControllableProvider; dispose: 
 	const projects = new ProjectService({ store: memoryProjectStore() });
 	const approvals = new ApprovalService(registry);
 	const models = new ModelService(registry, sessions);
+	const prompts = new PromptService(sessions);
+	const voice = new VoiceService(prompts);
 	const ui = new UiCoordinator(
-		{ registry, usage, sessions, git, projects, approvals, models },
+		{ registry, usage, sessions, git, projects, approvals, models, prompts, voice },
 		{ tickIntervalMs: 1_000 },
 	);
 	return {

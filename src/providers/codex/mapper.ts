@@ -16,8 +16,10 @@ import type {
 	WireThread,
 	WireThreadStatus,
 	WireTurnStatus,
+	WireUserInput,
 } from "./protocol.js";
 import type { ModelDescriptor } from "../../domain/model.js";
+import type { AgentInput } from "../provider.js";
 
 /** Bucket key used when the backend reports no `limitId`. */
 export const DEFAULT_LIMIT_BUCKET = "default";
@@ -339,4 +341,24 @@ export function wireModelToDescriptor(model: WireModel): ModelDescriptor {
 		descriptor.reasoningLevels = [...model.supportedReasoningEfforts];
 	}
 	return descriptor;
+}
+
+/**
+ * Domain input → Codex `UserInput` items.
+ *
+ * Empty text is dropped rather than sent: an accidental key press must not start
+ * a turn with nothing in it.
+ */
+export function toWireUserInput(input: AgentInput): WireUserInput[] {
+	const items: WireUserInput[] = [];
+	const text = input.text?.trim();
+	if (text !== undefined && text.length > 0) {
+		items.push({ type: "text", text });
+	}
+	for (const path of input.imagePaths ?? []) {
+		if (path.length > 0) {
+			items.push({ type: "localImage", path });
+		}
+	}
+	return items;
 }

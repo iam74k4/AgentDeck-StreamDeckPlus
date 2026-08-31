@@ -86,6 +86,51 @@
 			]
 		},
 		{
+			"UUID": "com.agentdeck.streamdeck-plus.prompt",
+			"Name": "Prompt",
+			"Tooltip": "Runs a prompt preset against the active agent.",
+			"Icon": "imgs/actions/prompt/icon",
+			"Controllers": ["Keypad"],
+			"PropertyInspectorPath": "ui/prompt.html",
+			"States": [
+				{
+					"Image": "imgs/actions/prompt/key",
+					"TitleAlignment": "middle",
+					"ShowTitle": false
+				}
+			]
+		},
+		{
+			"UUID": "com.agentdeck.streamdeck-plus.voice",
+			"Name": "Push to Talk",
+			"Tooltip": "Hold to record, release to send the transcript. Local recognition only.",
+			"Icon": "imgs/actions/voice/icon",
+			"Controllers": ["Keypad"],
+			"PropertyInspectorPath": "ui/voice.html",
+			"States": [
+				{
+					"Image": "imgs/actions/voice/key",
+					"TitleAlignment": "middle",
+					"ShowTitle": false
+				}
+			]
+		},
+		{
+			"UUID": "com.agentdeck.streamdeck-plus.screenshot",
+			"Name": "Screenshot to AI",
+			"Tooltip": "Captures the screen and sends it to the agent with a prompt.",
+			"Icon": "imgs/actions/screenshot/icon",
+			"Controllers": ["Keypad"],
+			"PropertyInspectorPath": "ui/screenshot.html",
+			"States": [
+				{
+					"Image": "imgs/actions/screenshot/key",
+					"TitleAlignment": "middle",
+					"ShowTitle": false
+				}
+			]
+		},
+		{
 			"UUID": "com.agentdeck.streamdeck-plus.usage",
 			"Name": "Usage",
 			"Tooltip": "Shows a provider's rate-limit window. Press to refresh.",

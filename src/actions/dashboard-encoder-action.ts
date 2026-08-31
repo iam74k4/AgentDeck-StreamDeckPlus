@@ -85,8 +85,13 @@ export class DashboardEncoderAction extends SingletonAction<DashboardEncoderSett
 	 * manual refresh of everything this segment can show (design §6.1).
 	 */
 	public override async onDialDown(ev: DialDownEvent<DashboardEncoderSettings>): Promise<void> {
-		if (ev.action.isDial() && this.#segmentOf(ev.action, ev.payload) === "model") {
+		const segment = ev.action.isDial() ? this.#segmentOf(ev.action, ev.payload) : undefined;
+		if (segment === "model") {
 			await this.#applyModel(ev.payload.settings);
+			return;
+		}
+		if (segment === "prompt") {
+			await this.#runPrompt(ev.payload.settings);
 			return;
 		}
 		await this.#refreshAll(ev.payload.settings);
@@ -125,6 +130,13 @@ export class DashboardEncoderAction extends SingletonAction<DashboardEncoderSett
 		// session rather than about this key.
 		if (segment === "model") {
 			this.#runtime.models.rotate(settings.providerId ?? this.#runtime.defaultProviderId, direction);
+			return;
+		}
+
+		// Design §14 — the dial is how a preset is chosen, so rotation selects and
+		// only the press sends.
+		if (segment === "prompt") {
+			this.#runtime.prompts.rotate(direction);
 			return;
 		}
 
@@ -200,6 +212,18 @@ export class DashboardEncoderAction extends SingletonAction<DashboardEncoderSett
 			await this.#runtime.models.apply(providerId);
 		} catch (error) {
 			this.#runtime.logger.warn("could not apply the selected model", error);
+		}
+	}
+
+	async #runPrompt(settings: DashboardEncoderSettings): Promise<void> {
+		const activePath = this.#runtime.projects.getActive()?.path;
+		try {
+			await this.#runtime.prompts.run(undefined, {
+				providerId: settings.providerId ?? this.#runtime.defaultProviderId,
+				...(activePath === undefined ? {} : { cwd: activePath }),
+			});
+		} catch (error) {
+			this.#runtime.logger.warn("prompt failed", error);
 		}
 	}
 

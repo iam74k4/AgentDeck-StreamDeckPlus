@@ -570,4 +570,88 @@ Turn開始（`turn/start`）はv0.3の作業のため、現時点でこの経路
 
 - 実機検証（[`DEVICE_TEST.md`](./DEVICE_TEST.md) §3.4 / §3.5）
 - v0.4 の残り（Plan Progress / Diff Summary / Session Manager強化）
-- v0.3（Push-to-Talk / Dictation / Voice Steer / Screenshot → AI）
+
+---
+
+## 9. v0.2 残項目 と v0.3 — Voice / Vision
+
+v0.2 の Prompt Dial / Clipboard → AI と、v0.3 の Push-to-Talk / Voice Steer /
+Screenshot → AI を実装した。
+
+### 前提 — Agentへテキストを送る経路
+
+v0.3 の入力はすべて「Agentへ何かを届ける」ので、まずその経路を作った。
+
+| 状況                  | メソッド       | 備考                              |
+| --------------------- | -------------- | --------------------------------- |
+| Turnが走っている      | `turn/steer`   | `expectedTurnId` が必須の事前条件 |
+| Idle                  | `turn/start`   | 応答の `turn.id` をSessionへ反映  |
+| 送り先のSessionが無い | `thread/start` | Active Projectの `cwd` で開く     |
+
+`expectedTurnId` があるおかげで、「デッキが状態を読んでから要求が届くまでの間に
+Turnが終わっていた」場合は前提条件エラーになり、別の場所へ紛れ込まない。
+
+### 設計差異 4 — `steer` のシグネチャ
+
+設計書 §8.1 は `steer?(sessionId: string, text: string)` としているが、
+Screenshot → AI（§15.1）は画像を添える必要がある。`AgentInput`
+（`{ text?, imagePaths? }`）へ広げた。メソッドを2つ並べるより、デッキが
+掴んだものを1つの型で運ぶほうが読みやすいと判断した。
+
+Codex側は `UserInput` の `text` / `localImage` バリアントへ写像する。
+
+### Prompt Preset
+
+設計書 §14 のとおり、Promptはキーを増やさずDialで選ぶ。Preset は
+「テンプレート＋入力元＋送り先」で、Push-to-Talk も Screenshot → AI も
+同じPresetを通す。送り先が3種（active-session / new-session / clipboard）
+あるので、§13.4 の Target Action もこれで賄える。
+
+テンプレートに `{{input}}` が無い場合でも入力は捨てずに末尾へ付ける。
+ユーザーが編集したPresetでプレースホルダを書き忘れたとき、コピーした内容が
+黙って消えるほうが問題だと考えた。
+
+### Desktop adapter — 1か所に閉じる
+
+Clipboard / Screenshot / Voice はいずれもNodeにバインディングが無いWindows APIを
+使うため、`src/adapters/desktop/host-shell.ts` 1か所からPowerShellを呼ぶ。
+スクリプトは引数配列で渡し、可変値は**環境変数経由**でスクリプト本文へ
+文字列連結しない（コマンド化を構造的に防ぐ）。
+
+CI環境にはWindowsもディスプレイもマイクも無いため、**スクリプト本体は未検証**。
+テストできる部分（プラットフォーム判定・上限・一時ファイルの寿命・
+ログに内容が出ないこと）は自動テストで担保している。
+
+### Voice — ローカル認識のみ
+
+設計書 §22.3 は「Local STT利用時は外部送信しない / Remote STT時は設定画面で明示する」
+と定める。実装は Windows 標準の `System.Speech`（ローカル）だけを持つため、
+明示すべきRemote STTがそもそも無い。音声も認識テキストもディスクに書かず、
+ログにも出さない（指示書 §11 "Voice raw data"）。
+
+Push-to-Talk は**押している間だけ**録音する。トグルにしなかったのは §22.3 の
+「録音停止状態を常に確認可能」のためで、2回目の押下を取りこぼして録音が
+続く状態を作れないようにした。
+
+### 検出した不具合
+
+- **Preset名がキーからはみ出す。** `Debug Screen` は11文字で切ると
+  `Debug Scre…` になり、しかも26pxでは144pxのキーに収まらない。折り返し →
+  縮小 → それでも入らなければ切り詰め、の順に直した。`fitFontSize` だけでは
+  最小サイズで頭打ちになり、`Internationalisation` のような1語が
+  はみ出したままになる。
+- **Touch Strip の Prompt detail が切れる。** `2/10 · clipboard → agent` は
+  200px幅に入らない。位置表示をタイトル側（`PROMPT 2/10`）へ移した。
+- **Dashboard の再描画対象リストが二重管理だった。** 実装とテスト用ランタイムで
+  別々に持っていたため、`voice` を追加したときテスト側だけ古いままになった。
+  `DASHBOARD_CONCERNS` として1か所へ出し、両方が同じ配線を使うようにした。
+
+### 制約（過大評価しないための注記）
+
+- Push-to-Talk / Screenshot は**実機未検証**。ロジックは自動テスト済みだが、
+  PowerShellスクリプトが意図どおり動くかは [`DEVICE_TEST.md`](./DEVICE_TEST.md)
+  §3.7 / §3.8 が初回検証になる。
+- `inputSource: "selection"` は Ctrl+C を送って読む方式のため、前面アプリが
+  コピーに対応していることが前提。対応していなければ空になる。
+- Windows 以外では desktop adapter は `NOT_CONFIGURED` を返し、キーは
+  `SETUP` 相当のアラートになる（Pluginは動き続ける）。

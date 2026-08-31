@@ -9,6 +9,8 @@
 import { ApprovalService } from "./application/approval-service.js";
 import { GitService } from "./application/git-service.js";
 import { ModelService } from "./application/model-service.js";
+import { PromptService } from "./application/prompt-service.js";
+import { VoiceService } from "./application/voice-service.js";
 import type { Unsubscribe } from "./domain/provider-events.js";
 import { ProjectService, type PathStat, type ProjectStore } from "./application/project-service.js";
 import { ProviderRegistry } from "./application/provider-registry.js";
@@ -16,10 +18,16 @@ import { SessionService } from "./application/session-service.js";
 import { UsageService } from "./application/usage-service.js";
 import { GitCliAdapter } from "./adapters/git/git-adapter.js";
 import { LauncherRegistry } from "./adapters/launcher/app-launcher.js";
+import { WindowsClipboard } from "./adapters/desktop/clipboard.js";
+import { WindowsScreenshot } from "./adapters/desktop/screenshot.js";
+import { SystemSpeechVoiceProvider } from "./adapters/desktop/voice.js";
+import type { Clipboard } from "./adapters/desktop/clipboard.js";
+import type { ScreenshotCapture } from "./adapters/desktop/screenshot.js";
+import type { VoiceInputProvider } from "./adapters/desktop/voice.js";
 import type { WindowSelection } from "./domain/usage.js";
 import type { Logger } from "./infrastructure/logger.js";
 import { PlusDashboardCoordinator } from "./presentation/plus-dashboard-coordinator.js";
-import { UiCoordinator } from "./presentation/ui-coordinator.js";
+import { UiCoordinator, type UiConcern } from "./presentation/ui-coordinator.js";
 import { ClaudeProvider, type ClaudeProviderOptions } from "./providers/claude/claude-provider.js";
 import {
 	CodexProvider,
@@ -33,6 +41,24 @@ import {
  * The provider and repository come from encoder action settings, so the runtime
  * has to be told; otherwise a background redraw would blank the git segment.
  */
+/**
+ * Concerns that repaint the touch strip.
+ *
+ * `tick` is deliberately absent: it is subscribed only while an encoder is
+ * placed (design §20.2). Exported so tests drive the same wiring the plugin
+ * does — a segment that stops updating is the defect this list guards against.
+ */
+export const DASHBOARD_CONCERNS = [
+	"usage",
+	"session",
+	"git",
+	"project",
+	"provider",
+	"model",
+	"prompt",
+	"voice",
+] as const satisfies readonly UiConcern[];
+
 export interface DashboardContext {
 	providerId?: string;
 	repositoryPath?: string;
@@ -48,6 +74,8 @@ export interface AgentDeckRuntime {
 	readonly projects: ProjectService;
 	readonly approvals: ApprovalService;
 	readonly models: ModelService;
+	readonly prompts: PromptService;
+	readonly voice: VoiceService;
 	readonly launchers: LauncherRegistry;
 	readonly ui: UiCoordinator;
 	readonly dashboard: PlusDashboardCoordinator;
@@ -68,6 +96,11 @@ export interface RuntimeOptions {
 	claude?: ClaudeProviderOptions;
 	gitExecutable?: string;
 	gitPollIntervalMs?: number;
+	/** Test seams for the desktop adapters (design §15). */
+	clipboard?: Clipboard;
+	screenshot?: ScreenshotCapture;
+	voice?: VoiceInputProvider;
+	writeClipboard?: (text: string) => Promise<void>;
 }
 
 export function createRuntime(options: RuntimeOptions): AgentDeckRuntime {
@@ -101,7 +134,27 @@ export function createRuntime(options: RuntimeOptions): AgentDeckRuntime {
 	const approvals = new ApprovalService(registry, { logger });
 	const models = new ModelService(registry, sessions, { logger });
 
-	const ui = new UiCoordinator({ registry, usage, sessions, git, projects, approvals, models }, { logger });
+	// Desktop capture is Windows-only (design §2). The adapters are constructed
+	// everywhere and report NOT_CONFIGURED off Windows, so a key says SETUP
+	// instead of the plugin refusing to start.
+	const clipboard = options.clipboard ?? new WindowsClipboard({ logger });
+	const screenshot = options.screenshot ?? new WindowsScreenshot({ logger });
+	const prompts = new PromptService(sessions, {
+		logger,
+		clipboard,
+		screenshot,
+		writeClipboard: options.writeClipboard,
+	});
+	// Design §22.3 — local recognition only; there is no remote STT to disclose.
+	const voice = new VoiceService(prompts, {
+		logger,
+		provider: options.voice ?? new SystemSpeechVoiceProvider({ logger }),
+	});
+
+	const ui = new UiCoordinator(
+		{ registry, usage, sessions, git, projects, approvals, models, prompts, voice },
+		{ logger },
+	);
 
 	// The elapsed-time tick exists for the touch strip; with no encoder placed,
 	// nothing here should keep a 1 Hz timer alive (design §20.2).
@@ -152,9 +205,8 @@ export function createRuntime(options: RuntimeOptions): AgentDeckRuntime {
 		);
 	}
 
-	// Keep the touch strip in step with every concern the dashboard shows. `tick`
-	// is deliberately absent: it is subscribed only while an encoder is placed.
-	for (const concern of ["usage", "session", "git", "project", "provider", "model"] as const) {
+	// Keep the touch strip in step with every concern the dashboard shows.
+	for (const concern of DASHBOARD_CONCERNS) {
 		ui.subscribe(concern, refreshDashboard);
 	}
 
@@ -167,6 +219,8 @@ export function createRuntime(options: RuntimeOptions): AgentDeckRuntime {
 		projects,
 		approvals,
 		models,
+		prompts,
+		voice,
 		launchers,
 		ui,
 		dashboard,
@@ -202,6 +256,9 @@ export function createRuntime(options: RuntimeOptions): AgentDeckRuntime {
 			releaseTick = undefined;
 			ui.dispose();
 			projects.dispose();
+			void voice.cancel();
+			voice.dispose();
+			prompts.dispose();
 			models.dispose();
 			approvals.dispose();
 			git.dispose();

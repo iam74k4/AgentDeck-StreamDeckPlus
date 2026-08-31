@@ -39,8 +39,8 @@ npx @elgato/cli restart com.agentdeck.streamdeck-plus
 
 ![AgentDeckを載せたStream Deck +](images/deck.svg)
 
-上段4キーがAgentへの応答（状態・停止・承認・拒否）、下段が文脈（Usage 2 Provider・
-Git・Project）。
+上段4キーがAgentへの応答（状態・停止・承認・拒否）、下段が入力と文脈
+（Push-to-Talk・Prompt・Claude Usage・Project）。
 Touch Stripは4本すべてに Dashboard Segment を置くと1枚のダッシュボードとして
 協調動作し、3本以下なら各Actionの `Segment` 設定に従う。
 
@@ -102,13 +102,49 @@ Turn開始はv0.3の作業なので、この節は該当機能が入るまで実
 - [ ] 押下で適用され、表示から `press` が消える
 - [ ] Provider を Claude にすると `not supported` になり、押下しても失敗しない
 
-### 3.6 Profile切替 / 再接続
+### 3.6 Prompt / Clipboard（設計書 §14, §15.2）
+
+- [ ] Prompt キーに Preset 名と入力元（`clipboard → agent` 等）が表示される
+- [ ] コードを選択してコピーし、Prompt キーを押すとその内容がAgentへ届く
+- [ ] Encoder の Segment を Prompt にすると、回転でPresetが切り替わる
+- [ ] 回転しただけでは送信されない
+- [ ] ダイヤル押下で選択中のPresetが実行される
+- [ ] `inputSource: selection` のPresetで、選択範囲がコピーされて送られる
+      （Ctrl+C を送るため、対象アプリがコピーに対応している必要がある）
+- [ ] 巨大なクリップボード内容が上限で打ち切られ、`truncated by AgentDeck` が付く
+- [ ] `target: clipboard` のPresetが、Agentへ送らずクリップボードへ書き戻す
+
+### 3.7 Push-to-Talk（設計書 §13.4, §22.3）
+
+**未検証機能**。CI環境にマイクが無いため、この節は実機が初回検証となる。
+
+- [ ] キーを押している間 `LISTENING` になり、Touch Strip にも表示される
+- [ ] キーを離すと録音が止まり、`MIC` へ戻る
+- [ ] 認識されたテキストがPresetを通してAgentへ届く
+- [ ] 無音のまま離すと、空のTurnが送られずアラート表示になる
+- [ ] 録音中にProfileを切り替えても、マイクが開いたままにならない
+- [ ] Windows Speech が未インストールの環境で、キーがアラート表示になり
+      Pluginは動き続ける
+- [ ] `%appdata%\Elgato\StreamDeck\logs` に音声も認識テキストも出ない
+
+### 3.8 Screenshot → AI（設計書 §15.1, §22.4）
+
+**未検証機能**。CI環境にディスプレイが無いため、この節は実機が初回検証となる。
+
+- [ ] Active window モードで、前面ウィンドウだけが取得される
+- [ ] All screens モードで、全画面が取得される
+- [ ] 画像がPromptと一緒にAgentへ届く
+- [ ] 送信後、一時ファイルが残っていない（`%TEMP%\agentdeck-shot-*`）
+- [ ] 送信が失敗した場合も一時ファイルが残らない
+- [ ] ログに画像パスや画像内容が出ない
+
+### 3.9 Profile切替 / 再接続
 
 - [ ] Profileを切り替えてもEncoderの登録が壊れず、戻すと正しく再描画される
 - [ ] Stream Deckを抜き差ししてもPluginが落ちない
 - [ ] Stream Deckアプリを再起動してもPluginが復帰する
 
-### 3.7 Claude bridge
+### 3.10 Claude bridge
 
 - [ ] Claude Code の `statusLine` に bridge を設定し、Usage キーの Provider を
       Claude にすると % が表示される
@@ -119,7 +155,7 @@ Turn開始はv0.3の作業なので、この節は該当機能が入るまで実
 - [ ] Touch Strip の AI Overview に Claude と Codex が並び、合算されない
 - [ ] Provider を Claude にした STOP キーは点灯しない（制御チャネルが無いため）
 
-### 3.8 Failure（設計書 §26 Failure Test）
+### 3.11 Failure（設計書 §26 Failure Test）
 
 - [ ] Codex CLIが無い環境で `CLI?` と表示され、Pluginは動き続ける
 - [ ] Codex未ログイン時に `LOGIN` と表示される
@@ -129,12 +165,13 @@ Turn開始はv0.3の作業なので、この節は該当機能が入るまで実
 - [ ] Gitリポジトリでないパスを設定すると `NO GIT` と表示される
 - [ ] Active Sessionが無い状態でSTOPを押しても落ちず、アラート表示になる
 
-### 3.9 Security（指示書 §11）
+### 3.12 Security（指示書 §11）
 
 - [ ] `%appdata%\Elgato\StreamDeck\logs` のPluginログに
       OAuth Token / API Key / Authorization ヘッダが含まれない
 - [ ] Debug Logging を有効にしても上記が出力されない
 - [ ] 承認要求のコマンド全文がログに出ない（要求の種別とリスクのみ）
+- [ ] Clipboard内容 / 認識テキスト / Screenshotがログに出ない
 
 ## 4. 記録
 

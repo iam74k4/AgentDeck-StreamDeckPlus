@@ -17,7 +17,10 @@ import {
 	fit,
 	renderAgentStatusKey,
 	renderApprovalKey,
+	renderPromptKey,
 	renderStopKey,
+	renderVoiceKey,
+	wrapLabel,
 	renderUsageKey,
 } from "@/presentation/renderers/key-renderer.js";
 import { buildAgentStatusViewModel, formatElapsed } from "@/presentation/view-models/agent-status.js";
@@ -26,6 +29,9 @@ import type { ApprovalRequest } from "@/domain/approval.js";
 import { buildApproveKeyViewModel, buildDenyKeyViewModel } from "@/presentation/view-models/approval.js";
 import { buildGitViewModel } from "@/presentation/view-models/git.js";
 import { buildModelViewModel } from "@/presentation/view-models/model.js";
+import { buildPromptViewModel } from "@/presentation/view-models/prompt.js";
+import { buildVoiceViewModel } from "@/presentation/view-models/voice.js";
+import { DEFAULT_PROMPT_PRESETS, type PromptPreset } from "@/domain/prompt.js";
 import { buildOverviewViewModel } from "@/presentation/view-models/overview.js";
 import { buildProjectViewModel } from "@/presentation/view-models/project.js";
 import { buildProviderViewModel } from "@/presentation/view-models/provider.js";
@@ -236,6 +242,8 @@ describe("four-encoder coordination (design §6.2, instructions §8.3)", () => {
 			loading: false,
 			error: undefined,
 		}),
+		prompt: buildPromptViewModel({ preset: DEFAULT_PROMPT_PRESETS[0] as PromptPreset }),
+		voice: buildVoiceViewModel({ state: "idle" }),
 		overview: buildOverviewViewModel([]),
 		project: buildProjectViewModel({ total: 0 }),
 		provider: buildProviderViewModel({ label: "Codex", status: "ready" }),
@@ -424,5 +432,90 @@ describe("approval key rendering (design §12.4, §22.2)", () => {
 		const svg = decode(renderApprovalKey(buildDenyKeyViewModel({ request: request("high") })));
 		expect(svg).toContain("DENY");
 		expect(svg).not.toContain("stroke-dasharray");
+	});
+});
+
+describe("prompt and voice key rendering (design §13.4, §14)", () => {
+	const decode = (image: string): string =>
+		decodeURIComponent(image.replace("data:image/svg+xml;charset=utf8,", ""));
+
+	const widest = (svg: string): number => {
+		// Every label's estimated width, so none of them can exceed the key.
+		const matches = [...svg.matchAll(/font-size="([\d.]+)"[^>]*>([^<]*)</g)];
+		return Math.max(...matches.map(([, size, value]) => estimateWidth(value ?? "", Number(size))));
+	};
+
+	it("keeps a two-word preset name on the key instead of truncating it", () => {
+		const svg = decode(
+			renderPromptKey(
+				buildPromptViewModel({
+					preset: {
+						id: "debug-screen",
+						name: "Debug Screen",
+						template: "",
+						inputSource: "screenshot",
+						target: "active-session",
+					},
+				}),
+			),
+		);
+		// Both words survive, on their own lines.
+		expect(svg).toContain(">Debug<");
+		expect(svg).toContain(">Screen<");
+		expect(svg).not.toContain("…");
+		expect(widest(svg)).toBeLessThanOrEqual(144);
+	});
+
+	it("shrinks a single long word rather than letting it run off the key", () => {
+		const svg = decode(
+			renderPromptKey(
+				buildPromptViewModel({
+					preset: {
+						id: "x",
+						name: "Internationalisation",
+						template: "",
+						inputSource: "none",
+						target: "clipboard",
+					},
+				}),
+			),
+		);
+		expect(widest(svg)).toBeLessThanOrEqual(144);
+	});
+
+	it("keeps a long detail line inside the key too", () => {
+		const svg = decode(
+			renderPromptKey({
+				name: "Custom",
+				detail: "selection → new session",
+				position: "7/10",
+				color: "#3d8bfd",
+				available: true,
+			}),
+		);
+		expect(widest(svg)).toBeLessThanOrEqual(144);
+	});
+
+	it("wraps only when it has to", () => {
+		expect(wrapLabel("Review", 128, 26)).toEqual(["Review"]);
+		expect(wrapLabel("Debug Screen", 128, 26)).toEqual(["Debug", "Screen"]);
+		// A single word cannot be split, so it stays whole and is shrunk instead.
+		expect(wrapLabel("Internationalisation", 128, 26)).toEqual(["Internationalisation"]);
+	});
+
+	it("draws a live microphone as filled and an idle one as an outline (design §22.3)", () => {
+		const live = decode(renderVoiceKey(buildVoiceViewModel({ state: "listening" })));
+		const idle = decode(renderVoiceKey(buildVoiceViewModel({ state: "idle" })));
+
+		expect(live).toContain("LISTENING");
+		expect(live).toContain('fill="#e5484d"');
+		expect(idle).toContain("MIC");
+		expect(idle).toContain('fill="none"');
+	});
+
+	it("dims the microphone when voice input is unavailable", () => {
+		const svg = decode(renderVoiceKey(buildVoiceViewModel({ state: "unavailable" })));
+		expect(svg).toContain("not available");
+		expect(svg).toContain('opacity="0.35"');
 	});
 });

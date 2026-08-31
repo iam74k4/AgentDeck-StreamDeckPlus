@@ -11,6 +11,19 @@ import type { ProviderEventListener, Unsubscribe } from "../domain/provider-even
 import type { AgentSession } from "../domain/session.js";
 import type { ProviderId, UsageSnapshot } from "../domain/usage.js";
 
+/**
+ * What the deck can hand to an agent.
+ *
+ * Text comes from a prompt preset, the clipboard or dictation; images from a
+ * screenshot. Both are user-initiated: nothing here is ever sent automatically
+ * (design §22.4).
+ */
+export interface AgentInput {
+	text?: string;
+	/** Absolute paths to local images. */
+	imagePaths?: readonly string[];
+}
+
 /** Design §9.5 — the provider process lifecycle. */
 export type ProviderLifecycleState =
 	"stopped" | "starting" | "initializing" | "ready" | "backoff" | "stopping";
@@ -31,7 +44,19 @@ export interface AgentProvider {
 
 	listSessions?(): Promise<AgentSession[]>;
 	interrupt?(sessionId: string): Promise<void>;
-	steer?(sessionId: string, text: string): Promise<void>;
+
+	/**
+	 * Sends input to a session (design §12.3).
+	 *
+	 * Widened from the design's `steer(sessionId, text)` because Screenshot → AI
+	 * (§15.1) has to attach an image, and one method that carries what the deck
+	 * captured reads better than a second one beside it. Text-only callers pass
+	 * `{ text }`.
+	 */
+	steer?(sessionId: string, input: AgentInput): Promise<void>;
+
+	/** Opens a new session, optionally rooted at a directory (design §14 target). */
+	startSession?(options?: { cwd?: string }): Promise<AgentSession>;
 	getModels?(): Promise<ModelDescriptor[]>;
 
 	/**

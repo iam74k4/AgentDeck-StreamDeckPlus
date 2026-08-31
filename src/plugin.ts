@@ -11,6 +11,9 @@ import { ApproveAction } from "./actions/approve-action.js";
 import { DenyAction } from "./actions/deny-action.js";
 import { LauncherAction } from "./actions/launcher-action.js";
 import { ProjectAction } from "./actions/project-action.js";
+import { PromptAction } from "./actions/prompt-action.js";
+import { ScreenshotAction } from "./actions/screenshot-action.js";
+import { VoiceAction } from "./actions/voice-action.js";
 import { DashboardEncoderAction } from "./actions/dashboard-encoder-action.js";
 import { GitAction } from "./actions/git-action.js";
 import { StopAction } from "./actions/stop-action.js";
@@ -36,6 +39,8 @@ interface AgentDeckGlobalSettings {
 	gitPollIntervalMs?: number;
 	/** Registered projects and the active one (design §7.1). */
 	projects?: SettingsValue;
+	/** Prompt presets, editable from any Property Inspector (design §14). */
+	promptPresets?: SettingsValue;
 	activeProjectId?: string | null;
 	debugLogging?: boolean;
 	[key: string]: SettingsValue;
@@ -97,6 +102,9 @@ streamDeck.actions.registerAction(new UsageAction(runtime));
 streamDeck.actions.registerAction(new GitAction(runtime));
 streamDeck.actions.registerAction(new DashboardEncoderAction(runtime));
 streamDeck.actions.registerAction(new ProjectAction(runtime));
+streamDeck.actions.registerAction(new PromptAction(runtime));
+streamDeck.actions.registerAction(new VoiceAction(runtime));
+streamDeck.actions.registerAction(new ScreenshotAction(runtime));
 streamDeck.actions.registerAction(new LauncherAction(runtime));
 
 streamDeck.settings.onDidReceiveGlobalSettings<AgentDeckGlobalSettings>((ev) => {
@@ -107,6 +115,10 @@ async function applyGlobalSettings(settings: AgentDeckGlobalSettings): Promise<v
 	const level: AgentDeckLogLevel = settings.debugLogging === true ? "debug" : "info";
 	logger.setLevel(level);
 	streamDeck.logger.setLevel(level);
+
+	if (Array.isArray(settings.promptPresets)) {
+		runtime.prompts.setPresets(settings.promptPresets as unknown[]);
+	}
 
 	runtime.git.setPollInterval(
 		typeof settings.gitPollIntervalMs === "number" ? settings.gitPollIntervalMs : undefined,
