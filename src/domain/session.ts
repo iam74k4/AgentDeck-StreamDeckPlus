@@ -2,22 +2,22 @@
  * Agent session domain model — design §7.2.
  */
 
+import type { DiffSummary } from "./git.js";
 import type { ProviderId } from "./usage.js";
 
 export type AgentSessionState =
 	"idle" | "starting" | "working" | "waiting-approval" | "completed" | "error" | "disconnected";
 
-/** Reserved for v0.4 (design §5.4); modelled now so the interface boundary stays stable. */
+/**
+ * Design §3.5 — `Plan 2/4`.
+ *
+ * How far through its own plan the agent says it is. Steps are counted, never
+ * listed: the deck shows progress, and the plan itself belongs in the agent's
+ * own UI.
+ */
 export interface PlanSummary {
 	completedSteps: number;
 	totalSteps: number;
-}
-
-/** Reserved for v0.4 (design §5.4). */
-export interface DiffSummary {
-	added: number;
-	removed: number;
-	fileCount: number;
 }
 
 export interface SessionTokenUsage {
@@ -92,4 +92,12 @@ export function pickActiveSession(sessions: readonly AgentSession[]): AgentSessi
 		}
 	}
 	return best;
+}
+
+/** Design §3.5 — `Plan 2/4`, or an empty string when there is no plan. */
+export function formatPlanProgress(plan: PlanSummary | undefined): string {
+	if (plan === undefined || plan.totalSteps === 0) {
+		return "";
+	}
+	return `Plan ${plan.completedSteps}/${plan.totalSteps}`;
 }

@@ -118,6 +118,62 @@ describe("git adapter", () => {
 		});
 	});
 
+	it("summarises the working-tree diff against HEAD (design §16.2)", async () => {
+		const diffRepo = makeTempDir("agentdeck-diff-");
+		git(diffRepo, "init", "--initial-branch=main", ".");
+		writeFileSync(join(diffRepo, "a.txt"), "one\ntwo\nthree\n");
+		writeFileSync(join(diffRepo, "b.txt"), "keep\n");
+		git(diffRepo, "add", ".");
+		git(diffRepo, "commit", "-m", "initial");
+
+		// One file edited in the working tree, one staged, one untracked.
+		writeFileSync(join(diffRepo, "a.txt"), "one\ntwo\nthree\nfour\nfive\n");
+		writeFileSync(join(diffRepo, "b.txt"), "");
+		git(diffRepo, "add", "b.txt");
+		writeFileSync(join(diffRepo, "new.txt"), "brand new\n");
+
+		const status = await adapter.getStatus(diffRepo);
+
+		// Staged and unstaged both count; untracked does not, because `git diff`
+		// does not see it and the deck already reports it as U:1.
+		expect(status.diff).toEqual({ added: 2, removed: 1, fileCount: 2 });
+		expect(status.untracked).toBe(1);
+	});
+
+	it("reports no diff for a clean tree", async () => {
+		const cleanRepo = makeTempDir("agentdeck-clean-");
+		git(cleanRepo, "init", "--initial-branch=main", ".");
+		writeFileSync(join(cleanRepo, "a.txt"), "one\n");
+		git(cleanRepo, "add", ".");
+		git(cleanRepo, "commit", "-m", "initial");
+
+		const status = await adapter.getStatus(cleanRepo);
+
+		expect(status.diff).toEqual({ added: 0, removed: 0, fileCount: 0 });
+	});
+
+	it("still reports the branch when the diff cannot be read", async () => {
+		// The branch and its counts are what the git key exists for; losing the
+		// diff summary must not cost the user those.
+		const failing = new GitCliAdapter({
+			run: async (args) => {
+				if (args.includes("--numstat")) {
+					return { stdout: "", stderr: "boom", code: 128 };
+				}
+				return {
+					stdout: ["# branch.oid 8f1e5c0d", "# branch.head main", "# branch.ab +0 -0", ""].join("\n"),
+					stderr: "",
+					code: 0,
+				};
+			},
+		});
+
+		const status = await failing.getStatus(repo);
+
+		expect(status.branch).toBe("main");
+		expect(status.diff).toBeUndefined();
+	});
+
 	it("reports a repository with no commits yet", async () => {
 		const fresh = makeTempDir("agentdeck-fresh-");
 		git(fresh, "init", "--initial-branch=main", ".");

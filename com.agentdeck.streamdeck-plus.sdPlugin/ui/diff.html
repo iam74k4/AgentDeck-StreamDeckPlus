@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<title>Diff Summary</title>
+		<link rel="stylesheet" href="lib/pi.css" />
+	</head>
+	<body>
+		<h1>Diff Summary</h1>
+		<div class="row">
+			<label for="repo">Repository</label>
+			<input id="repo" type="text" placeholder="C:\src\my-project" data-setting="repositoryPath" />
+		</div>
+		<p class="hint">
+			Absolute path to a git working tree. Leave empty to follow the active project. Press the key to refresh.
+		</p>
+		<p class="hint">
+			Shows tracked changes against <code>HEAD</code> — staged and unstaged together. Untracked files are not
+			included, because <code>git diff</code> does not see them; the Git key counts those as <code>U:</code>.
+		</p>
+		<p class="hint">
+			Read-only. AgentDeck never writes to the repository, and the deck shows the size of the change only —
+			open the diff in your editor to read it.
+		</p>
+		<script src="lib/pi.js"></script>
+	</body>
+</html>

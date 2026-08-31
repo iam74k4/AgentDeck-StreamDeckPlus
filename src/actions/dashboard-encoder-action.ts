@@ -94,6 +94,10 @@ export class DashboardEncoderAction extends SingletonAction<DashboardEncoderSett
 			await this.#runPrompt(ev.payload.settings);
 			return;
 		}
+		if (segment === "session") {
+			this.#pinSession(ev.payload.settings);
+			return;
+		}
 		await this.#refreshAll(ev.payload.settings);
 	}
 
@@ -137,6 +141,15 @@ export class DashboardEncoderAction extends SingletonAction<DashboardEncoderSett
 		// only the press sends.
 		if (segment === "prompt") {
 			this.#runtime.prompts.rotate(direction);
+			return;
+		}
+
+		// Design §6.1 dial 2 — rotate switches session, press makes it active.
+		if (segment === "session") {
+			this.#runtime.sessions.rotateHighlight(
+				settings.providerId ?? this.#runtime.defaultProviderId,
+				direction,
+			);
 			return;
 		}
 
@@ -204,6 +217,13 @@ export class DashboardEncoderAction extends SingletonAction<DashboardEncoderSett
 	): SegmentKind | undefined {
 		const column = this.#columns.get(target.id) ?? encoderColumn(payload);
 		return isColumn(column) ? this.#runtime.dashboard.segmentFor(target.device.id, column) : undefined;
+	}
+
+	#pinSession(settings: DashboardEncoderSettings): void {
+		const providerId = settings.providerId ?? this.#runtime.defaultProviderId;
+		if (this.#runtime.sessions.pinHighlighted(providerId) === undefined) {
+			this.#runtime.logger.debug("no session to pin");
+		}
 	}
 
 	async #applyModel(settings: DashboardEncoderSettings): Promise<void> {

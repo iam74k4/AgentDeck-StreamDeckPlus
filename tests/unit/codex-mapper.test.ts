@@ -4,6 +4,8 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+	fileChangeToDiffSummary,
+	parsePlanProgress,
 	applyFullRateLimits,
 	applyRateLimitsUpdate,
 	createRateLimitState,
@@ -229,5 +231,71 @@ describe("model descriptors (design §19 — never hard-coded)", () => {
 
 	it("falls back to the id when no display name is reported", () => {
 		expect(wireModelToDescriptor({ id: "custom" })).toEqual({ id: "custom", label: "custom" });
+	});
+});
+
+describe("plan progress (design §3.5)", () => {
+	it("counts a markdown checklist", () => {
+		const text = ["- [x] Read the parser", "- [x] Add the failing test", "- [ ] Fix it"].join("\n");
+		expect(parsePlanProgress({ type: "plan", text })).toEqual({ completedSteps: 2, totalSteps: 3 });
+	});
+
+	it("accepts the tick marks Codex renders as well as x", () => {
+		const text = ["- [✔] one", "- [X] two", "- [ ] three"].join("\n");
+		expect(parsePlanProgress({ type: "plan", text })).toEqual({ completedSteps: 2, totalSteps: 3 });
+	});
+
+	it("accepts numbered steps and other bullets", () => {
+		const text = ["1. [x] one", "2) [ ] two", "* [ ] three", "+ [x] four"].join("\n");
+		expect(parsePlanProgress({ type: "plan", text })).toEqual({ completedSteps: 2, totalSteps: 4 });
+	});
+
+	it("ignores prose around the list", () => {
+		const text = ["Here is the plan.", "", "- [x] one", "- [ ] two", "", "I will start now."].join("\n");
+		expect(parsePlanProgress({ type: "plan", text })).toEqual({ completedSteps: 1, totalSteps: 2 });
+	});
+
+	it("reports nothing rather than Plan 0/0 for text with no checklist", () => {
+		// The item carries free text; putting a meaningless number on the key is
+		// worse than showing none.
+		expect(parsePlanProgress({ type: "plan", text: "I will look at the parser first." })).toBeUndefined();
+		expect(parsePlanProgress({ type: "plan", text: "" })).toBeUndefined();
+		expect(parsePlanProgress(undefined)).toBeUndefined();
+	});
+});
+
+describe("file change → diff summary (design §16.2)", () => {
+	it("counts the lines a patch adds and removes", () => {
+		const item = {
+			type: "fileChange" as const,
+			changes: [
+				{
+					path: "src/a.ts",
+					kind: { type: "update" },
+					diff: ["--- a/src/a.ts", "+++ b/src/a.ts", "@@", "-old line", "+new line", "+extra", " same"].join(
+						"\n",
+					),
+				},
+			],
+		};
+		expect(fileChangeToDiffSummary(item)).toEqual({ added: 2, removed: 1, fileCount: 1 });
+	});
+
+	it("does not count the +++ / --- headers as changed lines", () => {
+		const item = {
+			type: "fileChange" as const,
+			changes: [{ path: "a.ts", kind: { type: "add" }, diff: "--- /dev/null\n+++ b/a.ts\n+only line\n" }],
+		};
+		expect(fileChangeToDiffSummary(item)).toEqual({ added: 1, removed: 0, fileCount: 1 });
+	});
+
+	it("counts a file with no readable diff as changed, with no lines", () => {
+		const item = { type: "fileChange" as const, changes: [{ path: "imgs/logo.png", kind: { type: "add" } }] };
+		expect(fileChangeToDiffSummary(item)).toEqual({ added: 0, removed: 0, fileCount: 1 });
+	});
+
+	it("reports nothing when there are no changes to report", () => {
+		expect(fileChangeToDiffSummary({ type: "fileChange", changes: [] })).toBeUndefined();
+		expect(fileChangeToDiffSummary(undefined)).toBeUndefined();
 	});
 });

@@ -22,6 +22,7 @@ const { AgentStatusAction } = await import("@/actions/agent-status-action.js");
 const { StopAction } = await import("@/actions/stop-action.js");
 const { UsageAction } = await import("@/actions/usage-action.js");
 const { GitAction } = await import("@/actions/git-action.js");
+const { DiffAction } = await import("@/actions/diff-action.js");
 const { DashboardEncoderAction, cycleSegment, windowSelectionOf } =
 	await import("@/actions/dashboard-encoder-action.js");
 const { ApproveAction, holdDurationMs } = await import("@/actions/approve-action.js");
@@ -301,11 +302,13 @@ describe("dashboard encoder rotation", () => {
 
 		await action.onDialRotate(rotate(dial, {}, 1, 1));
 
-		// SEGMENT_KINDS order: usage, agent, model, git, …
-		expect(dial.settings.segment).toBe("model");
+		// Which segment comes next is `cycleSegment`'s business and is tested
+		// there; what matters here is that the rotation stored it and redrew.
+		const expected = cycleSegment("agent", 1);
+		expect(dial.settings.segment).toBe(expected);
 		// The plugin never receives its own setSettings back, so the redraw has to
 		// happen here rather than on a didReceiveSettings that never arrives.
-		expect(dial.lastTitle).toBe("MODEL");
+		expect(dial.lastTitle).toBe(expected.toUpperCase());
 	});
 
 	it("leaves settings alone when the provider reports no windows", async () => {
@@ -745,5 +748,153 @@ describe("screenshot key (design §15.1, §22.4)", () => {
 		expect(key.lastImage).toContain(">Debug<");
 		expect(key.lastImage).toContain(">Screen<");
 		expect(key.lastImage).toContain("screen → agent");
+	});
+});
+
+describe("diff key (design §16.2)", () => {
+	it("shows additions, removals and the file count", async () => {
+		const action = new DiffAction(fake.runtime);
+		const key = new FakeKey();
+
+		action.onWillAppear(appear(key, { repositoryPath: "/repo" }));
+
+		await vi.waitFor(() => expect(key.lastImage).toContain("3 files"));
+		expect(key.lastImage).toContain("+18");
+		expect(key.lastImage).toContain("-4");
+	});
+
+	it("tells a clean tree apart from a diff git could not read", async () => {
+		const action = new DiffAction(fake.runtime);
+
+		const clean = new FakeKey("clean");
+		fake.gitStatusFor("/clean", { diff: { added: 0, removed: 0, fileCount: 0 } });
+		action.onWillAppear(appear(clean, { repositoryPath: "/clean" }));
+		await vi.waitFor(() => expect(clean.lastImage).toContain("clean"));
+
+		const unknown = new FakeKey("unknown");
+		fake.gitStatusFor("/unknown", { diff: undefined });
+		action.onWillAppear(appear(unknown, { repositoryPath: "/unknown" }));
+		await vi.waitFor(() => expect(unknown.lastImage).toContain("no diff"));
+	});
+
+	it("follows the active project when no repository is configured", async () => {
+		const action = new DiffAction(fake.runtime);
+		const key = new FakeKey();
+		await fake.runtime.projects.add({ path: "/repo", name: "repo" });
+
+		action.onWillAppear(appear(key, {}));
+
+		await vi.waitFor(() => expect(key.lastImage).toContain("3 files"));
+	});
+
+	it("alerts rather than failing when there is no repository to look at", async () => {
+		const action = new DiffAction(fake.runtime);
+		const key = new FakeKey();
+
+		await action.onKeyDown(appear(key, {}));
+
+		expect(key.alertCount).toBe(1);
+	});
+});
+
+describe("session dial (design §6.1 dial 2)", () => {
+	const dialDown = (action: unknown, settings: object, column: number): never =>
+		({ action, payload: { settings: { ...settings }, coordinates: { column, row: 0 } } }) as never;
+
+	function twoSessions(): void {
+		fake.provider.pushSession({
+			id: "thr_a",
+			providerId: "codex",
+			state: "working",
+			updatedAt: new Date(2),
+			label: "Fix the parser",
+		});
+		fake.provider.pushSession({
+			id: "thr_b",
+			providerId: "codex",
+			state: "idle",
+			updatedAt: new Date(1),
+			label: "Write the docs",
+		});
+	}
+
+	it("shows the session the deck is following, with its state", async () => {
+		const action = new DashboardEncoderAction(fake.runtime);
+		const dial = new FakeDial();
+		twoSessions();
+
+		await action.onWillAppear(appear(dial, { segment: "session" }, 0));
+
+		// The busiest session is the active one until something is pinned.
+		expect(dial.lastTitle).toBe("SESSION 1/2");
+		expect(dial.lastValue).toBe("Fix the parser");
+	});
+
+	it("rotating switches session without changing which one is active", async () => {
+		const action = new DashboardEncoderAction(fake.runtime);
+		const dial = new FakeDial();
+		twoSessions();
+		await action.onWillAppear(appear(dial, { segment: "session" }, 0));
+
+		await action.onDialRotate(rotate(dial, { segment: "session" }, 1, 0));
+
+		expect(dial.lastValue).toBe("Write the docs");
+		// Nothing is pinned yet, so the active session is still the busiest one.
+		expect(fake.runtime.sessions.pinnedSessionId).toBeUndefined();
+		expect(fake.runtime.sessions.getActiveSession("codex")?.id).toBe("thr_a");
+	});
+
+	it("pressing pins the highlighted session as the active one", async () => {
+		const action = new DashboardEncoderAction(fake.runtime);
+		const dial = new FakeDial();
+		twoSessions();
+		await action.onWillAppear(appear(dial, { segment: "session" }, 0));
+		await action.onDialRotate(rotate(dial, { segment: "session" }, 1, 0));
+
+		await action.onDialDown(dialDown(dial, { segment: "session" }, 0));
+
+		expect(fake.runtime.sessions.pinnedSessionId).toBe("thr_b");
+		expect(fake.runtime.sessions.getActiveSession("codex")?.id).toBe("thr_b");
+		expect(dial.lastTitle).toContain("●");
+	});
+
+	it("pressing the pinned session again releases the pin", async () => {
+		const action = new DashboardEncoderAction(fake.runtime);
+		const dial = new FakeDial();
+		twoSessions();
+		await action.onWillAppear(appear(dial, { segment: "session" }, 0));
+		await action.onDialRotate(rotate(dial, { segment: "session" }, 1, 0));
+
+		await action.onDialDown(dialDown(dial, { segment: "session" }, 0));
+		await action.onDialDown(dialDown(dial, { segment: "session" }, 0));
+
+		expect(fake.runtime.sessions.pinnedSessionId).toBeUndefined();
+		expect(fake.runtime.sessions.getActiveSession("codex")?.id).toBe("thr_a");
+	});
+
+	it("shows plan progress on the session it is following", async () => {
+		const action = new DashboardEncoderAction(fake.runtime);
+		const dial = new FakeDial();
+		fake.provider.pushSession({
+			id: "thr_a",
+			providerId: "codex",
+			state: "working",
+			updatedAt: new Date(),
+			label: "Fix the parser",
+			plan: { completedSteps: 2, totalSteps: 4 },
+		});
+
+		await action.onWillAppear(appear(dial, { segment: "session" }, 0));
+
+		expect(dial.feedback[dial.feedback.length - 1]?.detail?.value).toBe("WORKING · Plan 2/4");
+	});
+
+	it("says so rather than blanking when there is no session", async () => {
+		const action = new DashboardEncoderAction(fake.runtime);
+		const dial = new FakeDial();
+
+		await action.onWillAppear(appear(dial, { segment: "session" }, 0));
+
+		expect(dial.lastValue).toBe("NO SESSION");
 	});
 });

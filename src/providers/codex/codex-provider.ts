@@ -34,7 +34,9 @@ import {
 	applyFullRateLimits,
 	applyRateLimitsUpdate,
 	createRateLimitState,
+	fileChangeToDiffSummary,
 	isAuthenticatedAccount,
+	parsePlanProgress,
 	isRateLimitReached,
 	threadStatusToSessionState,
 	toUsageWindows,
@@ -47,6 +49,9 @@ import {
 import {
 	CodexNotification,
 	type WireAccountRateLimitsUpdated,
+	type WireFileChangeItem,
+	type WireItemNotification,
+	type WirePlanItem,
 	type WireThreadStartedNotification,
 	type WireThreadStatusChanged,
 	type WireTurnNotification,
@@ -693,7 +698,7 @@ export class CodexProvider implements AgentProvider {
 					return;
 				case CodexNotification.ItemStarted:
 				case CodexNotification.ItemCompleted:
-					this.#touchSession((params as { threadId?: string } | undefined)?.threadId);
+					this.#onItem(params as WireItemNotification | undefined);
 					return;
 				default:
 					this.#logger.debug(`unhandled notification: ${method}`);
@@ -749,16 +754,18 @@ export class CodexProvider implements AgentProvider {
 		}
 		const existing = this.#sessions.get(threadId);
 		const now = new Date();
-		this.#upsertSession(
-			{
-				...(existing ?? { id: threadId, providerId: this.id, state: "working", updatedAt: now }),
-				state: "working",
-				currentTurnId: turn.id,
-				startedAt: now,
-				updatedAt: now,
-			},
-			{ emit: true },
-		);
+		// A new turn has its own plan and its own changes; carrying the previous
+		// turn's over would leave `Plan 4/4` sitting on the key through the next one.
+		const next: AgentSession = {
+			...(existing ?? { id: threadId, providerId: this.id, state: "working", updatedAt: now }),
+			state: "working",
+			currentTurnId: turn.id,
+			startedAt: now,
+			updatedAt: now,
+		};
+		delete next.plan;
+		delete next.diff;
+		this.#upsertSession(next, { emit: true });
 	}
 
 	#onTurnCompleted(params: WireTurnNotification | undefined): void {
@@ -785,7 +792,16 @@ export class CodexProvider implements AgentProvider {
 		this.#upsertSession(next, { emit: true });
 	}
 
-	#touchSession(threadId: string | undefined): void {
+	/**
+	 * Design §3.5 — `Plan 2/4` and `+142 -38`.
+	 *
+	 * Two item kinds carry something the deck shows; the rest only prove the
+	 * session is alive. A file-change item replaces the session's diff rather than
+	 * accumulating: Codex reports the patch it is applying, and adding successive
+	 * patches together would double-count a file edited twice in one turn.
+	 */
+	#onItem(params: WireItemNotification | undefined): void {
+		const threadId = params?.threadId;
 		if (typeof threadId !== "string") {
 			return;
 		}
@@ -793,7 +809,25 @@ export class CodexProvider implements AgentProvider {
 		if (existing === undefined) {
 			return;
 		}
-		this.#upsertSession({ ...existing, updatedAt: new Date() }, { emit: true });
+
+		const item = params?.item;
+		const next: AgentSession = { ...existing, updatedAt: new Date() };
+
+		if (item?.type === "plan") {
+			const plan = parsePlanProgress(item as WirePlanItem);
+			if (plan === undefined) {
+				delete next.plan;
+			} else {
+				next.plan = plan;
+			}
+		} else if (item?.type === "fileChange") {
+			const diff = fileChangeToDiffSummary(item as WireFileChangeItem);
+			if (diff !== undefined) {
+				next.diff = diff;
+			}
+		}
+
+		this.#upsertSession(next, { emit: true });
 	}
 
 	async #findActiveTurnId(sessionId: string): Promise<string | undefined> {

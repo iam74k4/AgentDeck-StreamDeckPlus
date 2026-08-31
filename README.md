@@ -12,7 +12,7 @@ do I stop it right now.
 
 ![A Stream Deck + running AgentDeck: eight keys showing agent status, stop, approve, deny, push-to-talk, a prompt preset, Claude usage and the active project, above a four-segment touch strip](docs/images/deck.svg)
 
-<sub>An agent waiting on a high-risk approval, with the microphone open: the Approve key shows a hold ring mid-hold, Deny is one press, and Push-to-Talk is recording. Below the strip are the segments an encoder can be set to instead, including the AI Overview — providers side by side, never summed. Generated from the shipped renderers by <code>npm run preview</code>.</sub>
+<sub>An agent waiting on a high-risk approval, with the microphone open: the Approve key shows a hold ring mid-hold, Deny is one press, and Push-to-Talk is recording. Below the strip are the segments an encoder can be set to instead — Session shows a pinned session at <code>Plan 2/4</code>, and the AI Overview keeps providers side by side, never summed. Generated from the shipped renderers by <code>npm run preview</code>.</sub>
 
 - **Design document (source of truth):** [`AGENTDECK_DESIGN.md`](./AGENTDECK_DESIGN.md)
 - **Implementation brief:** [`docs/AGENTDECK_CLAUDE_INSTRUCTIONS.md`](./docs/AGENTDECK_CLAUDE_INSTRUCTIONS.md)
@@ -20,9 +20,10 @@ do I stop it right now.
 
 ## Status
 
-Technical Spike and v0.1 Control Core complete, plus v0.2 (Claude usage, AI
-Overview, Prompt Dial, Clipboard → AI), v0.3 (Push-to-Talk, Voice Steer,
-Screenshot → AI) and the v0.4 Approval UI and Model / Reasoning selector.
+Every roadmap item through v0.4 is implemented: v0.1 Control Core, v0.2 (Claude
+usage, AI Overview, Prompt Dial, Clipboard → AI), v0.3 (Push-to-Talk, Voice
+Steer, Screenshot → AI) and v0.4 (Approval UI, Model / Reasoning selector, Plan
+Progress, Diff Summary, Session Manager).
 
 Everything that needs a microphone, a display or a foreground window is Windows
 API work that cannot run in CI — see [Voice and screen input](#voice-and-screen-input).
@@ -88,8 +89,9 @@ npx @elgato/cli restart com.agentdeck.streamdeck-plus
 | App Launcher      | Key        | Starts an app in the active project. See [Launching apps](#launching-apps).        |
 | Dashboard Segment | Encoder    | One touch-strip segment; four of them form a single dashboard.                     |
 
-The default strip is `USAGE · AGENT · MODEL · PROJECT` (design §6.1). Git,
-Provider health and the AI Overview are one Segment setting away on any encoder.
+The default strip is `USAGE · AGENT · MODEL · PROJECT` (design §6.1). Session,
+Git, Diff, Prompt, Provider health and the AI Overview are one Segment setting
+away on any encoder.
 
 ## Approvals
 
@@ -165,6 +167,45 @@ the scripts take their inputs from the environment rather than by string
 interpolation. **Neither has run on real hardware yet**: there is no microphone,
 display or foreground window in CI, so the logic around them is tested and the
 scripts themselves are not. They are on the device checklist.
+
+## Sessions
+
+The deck follows one session at a time — the one every "active session" key acts
+on. By default that is whichever is busiest, most recently updated. Set an
+encoder to the **Session** segment to take over: rotating steps through the
+provider's sessions, pressing pins the highlighted one, and pressing the pinned
+one again releases the pin and goes back to following the busiest.
+
+Rotating alone changes nothing, which is the point. A dial nudged while reaching
+past the deck must not silently redirect the STOP key.
+
+A pinned session is marked with a dot in the segment's title, because "which
+session am I about to stop" should never be a guess.
+
+## Plan progress
+
+When the agent publishes a plan, the touch strip shows how far through it is —
+`WORKING · Plan 2/4`. Steps are counted, never listed: the plan itself belongs in
+the agent's own UI.
+
+Only a checklist counts. Codex's plan item carries free text, and text with no
+checkboxes gets no number rather than a meaningless `Plan 0/0`. A new turn starts
+from no plan, so last turn's `Plan 4/4` never sits on the key through this one.
+
+## Diff summary
+
+The Diff key and segment show the size of the working-tree change — `+183 -42 ·
+7 files` — from `git diff --numstat HEAD`. Staged and unstaged together;
+untracked files are not included, because `git diff` does not see them and the
+Git key already counts those as `U:`.
+
+A clean tree and a diff git could not read are different things and look
+different: `+0 -0 · clean` against a dimmed `no diff`. Losing the diff never
+costs you the branch — if `git diff` fails, the Git key still reports everything
+else.
+
+The agent's own changes are tracked separately, from the patches it applies, and
+appear on the Session segment. Reading a diff belongs in the editor (design §3.5).
 
 ## Choosing a model
 
@@ -263,11 +304,12 @@ Every state is a colour and one short word. Nothing on the deck needs reading
 twice, and nothing needs scrolling — long output belongs in Codex or the editor,
 not here (design §3.5).
 
-![Key faces for each state: idle, working, approval, done, error, offline, CLI not found, login required, stale, rate-limited, and the approve and deny keys with and without a request waiting](docs/images/states.svg)
+![Key faces for each state: idle, working, approval, done, error, offline, CLI not found, login required, stale, rate-limited, the approve and deny keys, the microphone idle and recording, and a clean versus unreadable diff](docs/images/states.svg)
 
 The top row is the agent's own state; the next two are everything that can go
-wrong around it; the last is the approval pair, where the difference between one
-press and a hold is the whole of the safety rule. A provider problem outranks a stale session, so `CLI?` and
+wrong around it; the fourth is the approval pair, where the difference between
+one press and a hold is the whole of the safety rule; the last covers the
+microphone, and a clean tree against a diff git could not read. A provider problem outranks a stale session, so `CLI?` and
 `LOGIN` replace the session state rather than sitting beside it — and a failed
 refresh keeps the last good number under a `STALE` badge instead of blanking the
 key.

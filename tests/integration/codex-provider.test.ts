@@ -677,3 +677,75 @@ describe("sending input to a session (design §12.3)", () => {
 		expect(sent()[0]).toEqual({ method: "thread/start", params: { cwd: "C:/work/Game" } });
 	});
 });
+
+describe("plan and diff on a live session (design §3.5, §16.2)", () => {
+	const item = (delayMs: number, threadId: string, body: Record<string, unknown>) => ({
+		delayMs,
+		method: "item/completed",
+		params: { threadId, turnId: "turn_1", item: body, completedAtMs: 1 },
+	});
+
+	it("reports plan progress from the agent's own plan item", async () => {
+		const provider = createProvider({
+			FAKE_SCRIPT: JSON.stringify([
+				item(10, "thr_1", {
+					type: "plan",
+					id: "item_plan",
+					text: "- [x] Read the parser\n- [x] Add a test\n- [ ] Fix it",
+				}),
+			]),
+		});
+		await provider.start();
+		await waitFor(() => provider.sessions[0]?.plan !== undefined);
+
+		expect(provider.sessions[0]?.plan).toEqual({ completedSteps: 2, totalSteps: 3 });
+	});
+
+	it("reports what the agent changed from its file-change item", async () => {
+		const provider = createProvider({
+			FAKE_SCRIPT: JSON.stringify([
+				item(10, "thr_1", {
+					type: "fileChange",
+					id: "item_patch",
+					status: "completed",
+					changes: [
+						{ path: "src/a.ts", kind: { type: "update" }, diff: "--- a\n+++ b\n-old\n+new\n+more\n" },
+					],
+				}),
+			]),
+		});
+		await provider.start();
+		await waitFor(() => provider.sessions[0]?.diff !== undefined);
+
+		expect(provider.sessions[0]?.diff).toEqual({ added: 2, removed: 1, fileCount: 1 });
+	});
+
+	it("clears the previous turn's plan when a new turn starts", async () => {
+		const provider = createProvider({
+			FAKE_SCRIPT: JSON.stringify([
+				item(10, "thr_1", { type: "plan", id: "p", text: "- [x] done\n- [x] also done" }),
+				{
+					delayMs: 20,
+					method: "turn/started",
+					params: { threadId: "thr_1", turn: { id: "turn_2", status: "inProgress" } },
+				},
+			]),
+		});
+		await provider.start();
+		await waitFor(() => provider.sessions[0]?.plan !== undefined);
+
+		// `Plan 2/2` from the finished turn must not sit on the key through the next.
+		await waitFor(() => provider.sessions[0]?.currentTurnId === "turn_2");
+		expect(provider.sessions[0]?.plan).toBeUndefined();
+	});
+
+	it("ignores an item for a session it does not know", async () => {
+		const provider = createProvider({
+			FAKE_SCRIPT: JSON.stringify([item(10, "thr_unknown", { type: "plan", id: "p", text: "- [ ] one" })]),
+		});
+		await provider.start();
+		await waitFor(() => provider.sessions.length > 0);
+
+		expect(provider.sessions.every((session) => session.plan === undefined)).toBe(true);
+	});
+});

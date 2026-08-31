@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 import { gitFailureToError } from "@/adapters/git/git-adapter.js";
 import { parseGitStatusPorcelainV2 } from "@/adapters/git/git-status-parser.js";
+import { formatDiffSummary, parseGitNumstat } from "@/domain/git.js";
 
 const CLEAN = `# branch.oid 8f1e5c0d
 # branch.head main
@@ -85,5 +86,52 @@ describe("git status porcelain v2 (design §16.1)", () => {
 	it("classifies a failure by whether the path is a work tree, not by message text", () => {
 		expect(gitFailureToError("/tmp", false).code).toBe("GIT_NOT_REPOSITORY");
 		expect(gitFailureToError("/repo", true).code).toBe("UNKNOWN");
+	});
+});
+
+describe("git numstat (design §16.2)", () => {
+	it("totals additions, removals and files", () => {
+		const output = ["12\t3\tsrc/a.ts", "5\t0\tsrc/b.ts", "0\t9\tdocs/c.md"].join("\n");
+		expect(parseGitNumstat(output)).toEqual({ added: 17, removed: 12, fileCount: 3 });
+	});
+
+	it("counts a binary file as changed but contributes no lines", () => {
+		// git reports `-` for both counts on a binary file.
+		const output = ["4\t1\tsrc/a.ts", "-\t-\timgs/logo.png"].join("\n");
+		expect(parseGitNumstat(output)).toEqual({
+			added: 4,
+			removed: 1,
+			fileCount: 2,
+			binaryFileCount: 1,
+		});
+	});
+
+	it("returns an empty summary for a clean tree", () => {
+		expect(parseGitNumstat("")).toEqual({ added: 0, removed: 0, fileCount: 0 });
+		expect(parseGitNumstat("\n  \n")).toEqual({ added: 0, removed: 0, fileCount: 0 });
+	});
+
+	it("ignores a line that is not numstat rather than counting it as a file", () => {
+		expect(parseGitNumstat("not numstat at all")).toEqual({ added: 0, removed: 0, fileCount: 0 });
+	});
+
+	it("handles a path containing a tab", () => {
+		// Only the first two fields are counts; the rest is the path.
+		expect(parseGitNumstat("2\t1\tsrc/od\td.ts")).toMatchObject({ added: 2, removed: 1, fileCount: 1 });
+	});
+});
+
+describe("formatDiffSummary", () => {
+	it("renders the design's shape", () => {
+		expect(formatDiffSummary({ added: 183, removed: 42, fileCount: 7 })).toBe("+183 -42 · 7 files");
+	});
+
+	it("says one file in the singular", () => {
+		expect(formatDiffSummary({ added: 1, removed: 0, fileCount: 1 })).toBe("+1 -0 · 1 file");
+	});
+
+	it("says nothing when there is nothing to say", () => {
+		expect(formatDiffSummary(undefined)).toBe("");
+		expect(formatDiffSummary({ added: 0, removed: 0, fileCount: 0 })).toBe("");
 	});
 });

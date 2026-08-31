@@ -12,7 +12,7 @@
 
 import { execFile } from "node:child_process";
 import { AgentDeckError } from "../../domain/errors.js";
-import type { GitStatus } from "../../domain/git.js";
+import { parseGitNumstat, type DiffSummary, type GitStatus } from "../../domain/git.js";
 import type { Logger } from "../../infrastructure/logger.js";
 import { parseGitStatusPorcelainV2 } from "./git-status-parser.js";
 
@@ -69,7 +69,40 @@ export class GitCliAdapter implements GitAdapter {
 			this.#logger?.debug(`git status exited with ${result.code}; classifying`);
 			throw gitFailureToError(path, await this.isRepository(path));
 		}
-		return parseGitStatusPorcelainV2(result.stdout, path);
+
+		const status = parseGitStatusPorcelainV2(result.stdout, path);
+		const diff = await this.#readDiff(path, status.hasCommits);
+		return diff === undefined ? status : { ...status, diff };
+	}
+
+	/**
+	 * Design §16.2 — tracked changes against HEAD.
+	 *
+	 * Best effort on purpose: a branch and its counts are what the git key exists
+	 * for, and losing the diff summary must not cost the user those. A repository
+	 * with no commits has no HEAD to diff against, so it is skipped rather than
+	 * spawning git to be told so.
+	 *
+	 * Untracked files are deliberately absent — `git diff` does not see them — and
+	 * the deck already counts them separately as `U:`.
+	 */
+	async #readDiff(path: string, hasCommits: boolean): Promise<DiffSummary | undefined> {
+		if (!hasCommits) {
+			return undefined;
+		}
+		try {
+			const result = await this.#run(["-C", path, "diff", "--numstat", "HEAD"], {
+				timeoutMs: this.#timeoutMs,
+			});
+			if (result.code !== 0) {
+				this.#logger?.debug(`git diff --numstat exited with ${result.code}`);
+				return undefined;
+			}
+			return parseGitNumstat(result.stdout);
+		} catch (error) {
+			this.#logger?.debug("git diff --numstat failed", error);
+			return undefined;
+		}
 	}
 
 	#defaultRunner(): GitRunner {

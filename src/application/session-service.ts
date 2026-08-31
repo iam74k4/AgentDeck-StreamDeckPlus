@@ -26,6 +26,7 @@ export class SessionService {
 	readonly #listeners = new Set<SessionListener>();
 	readonly #logger: Logger | undefined;
 	#pinnedSessionId: string | undefined;
+	#highlightedSessionId: string | undefined;
 	#unsubscribe: Unsubscribe | undefined;
 
 	public constructor(registry: ProviderRegistry, options: SessionServiceOptions = {}) {
@@ -44,8 +45,13 @@ export class SessionService {
 				const key = `${providerId}::${event.sessionId}`;
 				const removed = this.#sessions.get(key);
 				this.#sessions.delete(key);
-				if (removed !== undefined && this.#pinnedSessionId === event.sessionId) {
-					this.#pinnedSessionId = undefined;
+				if (removed !== undefined) {
+					if (this.#pinnedSessionId === event.sessionId) {
+						this.#pinnedSessionId = undefined;
+					}
+					if (this.#highlightedSessionId === event.sessionId) {
+						this.#highlightedSessionId = undefined;
+					}
 				}
 				this.#notify();
 			}
@@ -83,6 +89,53 @@ export class SessionService {
 	public pin(sessionId: string | undefined): void {
 		this.#pinnedSessionId = sessionId;
 		this.#notify();
+	}
+
+	/**
+	 * The session the Session dial is pointing at — design §6.1 dial 2.
+	 *
+	 * Rotating moves this; only a press pins it. The two are separate for the same
+	 * reason the model selector separates them: a dial nudged while reaching past
+	 * the deck must not silently redirect the keys that follow the active session.
+	 *
+	 * Defaults to whatever is active, so the first rotation starts from what the
+	 * deck is already showing rather than from the top of the list.
+	 */
+	public getHighlighted(providerId?: ProviderId): AgentSession | undefined {
+		const candidates = this.list(providerId);
+		const highlighted = candidates.find((session) => session.id === this.#highlightedSessionId);
+		return highlighted ?? this.getActiveSession(providerId);
+	}
+
+	public rotateHighlight(providerId: ProviderId | undefined, delta: number): void {
+		const candidates = this.#ordered(providerId);
+		if (candidates.length === 0) {
+			return;
+		}
+		const current = this.getHighlighted(providerId);
+		const index = candidates.findIndex((session) => session.id === current?.id);
+		const from = index === -1 ? 0 : index;
+		const next = candidates[(((from + delta) % candidates.length) + candidates.length) % candidates.length];
+		this.#highlightedSessionId = next?.id;
+		this.#notify();
+	}
+
+	/** Design §6.1 dial 2, press — "Active Session選択". */
+	public pinHighlighted(providerId?: ProviderId): AgentSession | undefined {
+		const highlighted = this.getHighlighted(providerId);
+		if (highlighted === undefined) {
+			return undefined;
+		}
+		// Pressing the session already pinned releases the pin, so there is a way
+		// back to following whatever is busiest without a settings trip.
+		this.#pinnedSessionId = this.#pinnedSessionId === highlighted.id ? undefined : highlighted.id;
+		this.#notify();
+		return highlighted;
+	}
+
+	/** Stable rotation order: a dial that reorders under the finger is unusable. */
+	#ordered(providerId?: ProviderId): AgentSession[] {
+		return this.list(providerId).sort((left, right) => left.id.localeCompare(right.id));
 	}
 
 	public get pinnedSessionId(): string | undefined {

@@ -18,6 +18,7 @@ import {
 	renderAgentStatusKey,
 	renderApprovalKey,
 	renderGitKey,
+	renderDiffKey,
 	renderPromptKey,
 	renderVoiceKey,
 	renderLauncherKey,
@@ -28,8 +29,10 @@ import {
 import {
 	renderAgentSegment,
 	renderGitSegment,
+	renderDiffSegment,
 	renderModelSegment,
 	renderPromptSegment,
+	renderSessionSegment,
 	renderOverviewSegment,
 	renderProjectSegment,
 	renderProviderSegment,
@@ -39,7 +42,9 @@ import {
 import { buildAgentStatusViewModel } from "../presentation/view-models/agent-status.js";
 import { buildApproveKeyViewModel, buildDenyKeyViewModel } from "../presentation/view-models/approval.js";
 import { buildGitViewModel } from "../presentation/view-models/git.js";
+import { buildDiffViewModel } from "../presentation/view-models/diff.js";
 import { buildPromptViewModel } from "../presentation/view-models/prompt.js";
+import { buildSessionViewModel } from "../presentation/view-models/session.js";
 import { buildVoiceViewModel } from "../presentation/view-models/voice.js";
 import { buildModelViewModel } from "../presentation/view-models/model.js";
 import { buildOverviewViewModel } from "../presentation/view-models/overview.js";
@@ -201,8 +206,8 @@ function session(state: AgentSessionState, startedMsAgo?: number) {
 
 const gitEntry = (overrides: Parameters<typeof buildGitViewModel>[0]) => buildGitViewModel(overrides);
 
-/** One repository, used by both the Git key and the Git segment. */
-const REPO_STATUS = gitEntry({
+/** One repository, used by the Git key, the Git segment and the Diff segment. */
+const REPO_ENTRY = {
 	path: "/repo",
 	fetchedAt: NOW,
 	status: {
@@ -216,7 +221,25 @@ const REPO_STATUS = gitEntry({
 		conflicted: 0,
 		ahead: 1,
 		behind: 0,
+		diff: { added: 183, removed: 42, fileCount: 7 },
 	},
+} as const;
+
+const REPO_STATUS = gitEntry(REPO_ENTRY);
+
+/** A second session, so the Session segment shows the rotation position. */
+const SESSION_VIEW = buildSessionViewModel({
+	session: {
+		id: "thr_1",
+		providerId: "codex",
+		state: "working",
+		updatedAt: NOW,
+		label: "Fix the parser",
+		plan: { completedSteps: 2, totalSteps: 4 },
+	},
+	index: 0,
+	total: 2,
+	pinnedSessionId: "thr_1",
 });
 
 function usageKey(options: Parameters<typeof buildUsageViewModel>[0]): string {
@@ -266,7 +289,8 @@ export function renderDeckPreview(layout: SegmentLayout): string {
 	const stripY = PAD + keySize * 2 + keyGap + 40;
 	const dialY = stripY + SEGMENT_HEIGHT + 26;
 	const altY = dialY + 78;
-	const height = altY + SEGMENT_HEIGHT + 24 + PAD;
+	// Two rows of alternates now.
+	const height = altY + SEGMENT_HEIGHT * 2 + 16 + 24 + PAD;
 	// Room to the right of the strip for the keys that are not on the sheet above.
 	const width = CONTENT + PAD * 2 + 140;
 
@@ -351,15 +375,26 @@ export function renderDeckPreview(layout: SegmentLayout): string {
 		`<g transform="translate(${PAD},${altY})">`,
 		`<rect x="-4" y="-4" width="${SEGMENT_WIDTH * 4 + 8}" height="${SEGMENT_HEIGHT + 8}" rx="10" fill="#0b0c0e"/>`,
 		`<g>${drawSegment(layout, renderGitSegment(REPO_STATUS))}</g>`,
-		`<g transform="translate(${SEGMENT_WIDTH},0)">${drawSegment(layout, renderPromptSegment(buildPromptViewModel({ preset: presetNamed("Review"), index: 1, total: DEFAULT_PROMPT_PRESETS.length })))}</g>`,
-		`<g transform="translate(${SEGMENT_WIDTH * 2},0)">${drawSegment(layout, renderOverviewSegment(buildOverviewViewModel(OVERVIEW)))}</g>`,
-		`<g transform="translate(${SEGMENT_WIDTH * 3},0)">${drawSegment(layout, renderProviderSegment(buildProviderViewModel({ label: "Codex", status: "ready" })))}</g>`,
+		`<g transform="translate(${SEGMENT_WIDTH},0)">${drawSegment(layout, renderDiffSegment(buildDiffViewModel(REPO_ENTRY)))}</g>`,
+		`<g transform="translate(${SEGMENT_WIDTH * 2},0)">${drawSegment(layout, renderSessionSegment(SESSION_VIEW))}</g>`,
+		`<g transform="translate(${SEGMENT_WIDTH * 3},0)">${drawSegment(layout, renderPromptSegment(buildPromptViewModel({ preset: presetNamed("Review"), index: 1, total: DEFAULT_PROMPT_PRESETS.length })))}</g>`,
+		`</g>`,
+		`<g transform="translate(${PAD},${altY + SEGMENT_HEIGHT + 16})">`,
+		`<rect x="-4" y="-4" width="${SEGMENT_WIDTH * 2 + 8}" height="${SEGMENT_HEIGHT + 8}" rx="10" fill="#0b0c0e"/>`,
+		`<g>${drawSegment(layout, renderOverviewSegment(buildOverviewViewModel(OVERVIEW)))}</g>`,
+		`<g transform="translate(${SEGMENT_WIDTH},0)">${drawSegment(layout, renderProviderSegment(buildProviderViewModel({ label: "Codex", status: "ready" })))}</g>`,
 		`</g>`,
 		label("OTHER KEYS", PAD + CONTENT + 70, altY - 12, 10, "#4a4d52"),
 		placeKey(
 			renderLauncherKey({ name: "VS Code", detail: "agentdeck", installed: true }),
 			PAD + CONTENT + 20,
 			altY,
+			SEGMENT_HEIGHT,
+		),
+		placeKey(
+			renderDiffKey(buildDiffViewModel(REPO_ENTRY)),
+			PAD + CONTENT + 20,
+			altY + SEGMENT_HEIGHT + 16,
 			SEGMENT_HEIGHT,
 		),
 	].join("");
@@ -489,6 +524,29 @@ export function renderStatePreview(): string {
 			key: renderVoiceKey(buildVoiceViewModel({ state: "listening" })),
 			caption: "LISTENING",
 			note: "microphone is open",
+		},
+		// A clean tree and a diff git could not read must not look the same.
+		{
+			key: renderDiffKey(
+				buildDiffViewModel({
+					path: "/repo",
+					fetchedAt: NOW,
+					status: { ...REPO_ENTRY.status, diff: { added: 0, removed: 0, fileCount: 0 } },
+				}),
+			),
+			caption: "CLEAN",
+			note: "nothing changed",
+		},
+		{
+			key: renderDiffKey(
+				buildDiffViewModel({
+					path: "/repo",
+					fetchedAt: NOW,
+					status: { ...REPO_ENTRY.status, diff: undefined },
+				}),
+			),
+			caption: "NO DIFF",
+			note: "git could not report one",
 		},
 	];
 

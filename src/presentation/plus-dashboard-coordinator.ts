@@ -15,15 +15,18 @@
 import type { SegmentFeedback } from "./renderers/encoder-renderer.js";
 import {
 	renderAgentSegment,
+	renderDiffSegment,
 	renderGitSegment,
 	renderModelSegment,
 	renderPromptSegment,
 	renderOverviewSegment,
 	renderProjectSegment,
 	renderProviderSegment,
+	renderSessionSegment,
 	renderUsageSegment,
 } from "./renderers/encoder-renderer.js";
 import type { AgentStatusViewModel } from "./view-models/agent-status.js";
+import type { DiffViewModel } from "./view-models/diff.js";
 import type { GitViewModel } from "./view-models/git.js";
 import type { ModelViewModel } from "./view-models/model.js";
 import type { OverviewViewModel } from "./view-models/overview.js";
@@ -31,6 +34,7 @@ import type { ProjectViewModel } from "./view-models/project.js";
 import type { PromptViewModel } from "./view-models/prompt.js";
 import type { VoiceViewModel } from "./view-models/voice.js";
 import type { ProviderViewModel } from "./view-models/provider.js";
+import type { SessionViewModel } from "./view-models/session.js";
 import type { UsageViewModel } from "./view-models/usage.js";
 
 export type DeviceId = string;
@@ -38,9 +42,11 @@ export type Column = 0 | 1 | 2 | 3;
 export const SEGMENT_KINDS = [
 	"usage",
 	"agent",
+	"session",
 	"model",
 	"prompt",
 	"git",
+	"diff",
 	"project",
 	"overview",
 	"provider",
@@ -72,7 +78,9 @@ export interface EncoderContext {
 export interface DashboardData {
 	usage: UsageViewModel;
 	agent: AgentStatusViewModel;
+	session: SessionViewModel;
 	git: GitViewModel;
+	diff: DiffViewModel;
 	model: ModelViewModel;
 	prompt: PromptViewModel;
 	voice: VoiceViewModel;
@@ -200,8 +208,12 @@ export function renderSegment(kind: SegmentKind, data: DashboardData): SegmentFe
 			return renderUsageSegment(data.usage);
 		case "agent":
 			return renderAgentSegment(data.agent);
+		case "session":
+			return renderSessionSegment(data.session);
 		case "git":
 			return renderGitSegment(data.git);
+		case "diff":
+			return renderDiffSegment(data.diff);
 		case "model":
 			return renderModelSegment(data.model);
 		case "prompt":

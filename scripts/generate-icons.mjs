@@ -213,6 +213,12 @@ const GLYPHS = {
 		canvas.roundedRect(0.28, 0.38, 0.3, 0.06, 0.03, PALETTE.accent);
 		canvas.roundedRect(0.28, 0.5, 0.44, 0.06, 0.03, PALETTE.accent);
 	},
+	diff(canvas) {
+		// Two bars: what came in, what went out.
+		canvas.roundedRect(0.18, 0.26, 0.5, 0.14, 0.06, PALETTE.ok);
+		canvas.roundedRect(0.18, 0.46, 0.3, 0.14, 0.06, PALETTE.danger);
+		canvas.roundedRect(0.18, 0.66, 0.42, 0.1, 0.05, PALETTE.muted);
+	},
 	usage(canvas) {
 		canvas.roundedRect(0.16, 0.54, 0.16, 0.3, 0.05, PALETTE.ok);
 		canvas.roundedRect(0.42, 0.36, 0.16, 0.48, 0.05, PALETTE.warn);
@@ -270,6 +276,7 @@ const ACTIONS = [
 	"voice",
 	"screenshot",
 	"usage",
+	"diff",
 	"git",
 	"project",
 	"launcher",

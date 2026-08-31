@@ -8,6 +8,7 @@
 
 import type { AgentStatusViewModel } from "../view-models/agent-status.js";
 import type { ApprovalKeyViewModel } from "../view-models/approval.js";
+import type { DiffViewModel } from "../view-models/diff.js";
 import type { GitViewModel } from "../view-models/git.js";
 import type { ProjectViewModel } from "../view-models/project.js";
 import type { PromptViewModel } from "../view-models/prompt.js";
@@ -337,5 +338,29 @@ export function renderVoiceKey(vm: VoiceViewModel): string {
 	parts.push(text(label.value, 108, label.size, Palette.text, "700"));
 	const detail = fitText(vm.detail, SIZE - 16, 14, 10);
 	parts.push(text(detail.value, 130, detail.size, Palette.textMuted, "400"));
+	return svgToDataUri(frame(parts.join(""), { dimmed: !vm.available }));
+}
+
+/**
+ * Design §16.2 — `+183 / -42 / 7 files`.
+ *
+ * Additions and removals are drawn as two lines rather than one string so the
+ * two numbers can be read separately, and coloured so "how much was deleted" is
+ * answerable without reading the sign.
+ */
+export function renderDiffKey(vm: DiffViewModel): string {
+	const available = SIZE - 24;
+	const added = fitText(vm.added, available, 30, 15);
+	const removed = fitText(vm.removed, available, 30, 15);
+
+	const parts = [
+		text("DIFF", 30, 18, Palette.textMuted, "600"),
+		text(added.value, 70, added.size, vm.available ? Palette.ok : Palette.textMuted, "700"),
+		text(removed.value, 104, removed.size, vm.available ? Palette.danger : Palette.textMuted, "700"),
+	];
+	if (vm.detail.length > 0) {
+		const detail = fitText(vm.detail, available, 15, 11);
+		parts.push(text(detail.value, 128, detail.size, vm.color, "400"));
+	}
 	return svgToDataUri(frame(parts.join(""), { dimmed: !vm.available }));
 }

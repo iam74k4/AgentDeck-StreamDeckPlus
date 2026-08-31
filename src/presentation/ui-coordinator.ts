@@ -23,6 +23,7 @@ import { scheduleInterval, type ScheduledTask } from "../infrastructure/schedule
 import type { DashboardData } from "./plus-dashboard-coordinator.js";
 import type { VoiceViewModel } from "./view-models/voice.js";
 import { buildAgentStatusViewModel } from "./view-models/agent-status.js";
+import { buildDiffViewModel } from "./view-models/diff.js";
 import { buildGitViewModel } from "./view-models/git.js";
 import { buildModelViewModel } from "./view-models/model.js";
 import { buildPromptViewModel } from "./view-models/prompt.js";
@@ -30,6 +31,7 @@ import { buildVoiceViewModel } from "./view-models/voice.js";
 import { buildOverviewViewModel } from "./view-models/overview.js";
 import { buildProjectViewModel } from "./view-models/project.js";
 import { buildProviderViewModel } from "./view-models/provider.js";
+import { buildSessionViewModel } from "./view-models/session.js";
 import { buildUsageViewModel } from "./view-models/usage.js";
 
 export type UiConcern =
@@ -164,10 +166,15 @@ export class UiCoordinator {
 		const providerLabel = provider?.displayName ?? options.providerId;
 		const snapshot = this.#usage.getSnapshot(options.providerId);
 		const session = this.#sessions.getActiveSession(options.providerId);
+		// The Session dial follows its own highlight; every other segment follows
+		// whichever session is active (design §6.1 dial 2).
+		const sessions = this.#sessions.list(options.providerId);
+		const highlighted = this.#sessions.getHighlighted(options.providerId);
 		const now = this.#now();
 		const active = this.#projects.getActive();
 		// The active project is the repository unless an action names one explicitly.
 		const repositoryPath = options.repositoryPath ?? active?.path;
+		const gitEntry = repositoryPath === undefined ? undefined : this.#git.get(repositoryPath);
 
 		return {
 			usage: buildUsageViewModel({
@@ -184,8 +191,17 @@ export class UiCoordinator {
 				session,
 				now,
 			}),
+			session: buildSessionViewModel({
+				...(highlighted === undefined ? {} : { session: highlighted }),
+				index: sessions.findIndex((candidate) => candidate.id === highlighted?.id),
+				total: sessions.length,
+				...(this.#sessions.pinnedSessionId === undefined
+					? {}
+					: { pinnedSessionId: this.#sessions.pinnedSessionId }),
+			}),
 			overview: buildOverviewViewModel(this.#usage.overview()),
-			git: buildGitViewModel(repositoryPath === undefined ? undefined : this.#git.get(repositoryPath)),
+			git: buildGitViewModel(gitEntry),
+			diff: buildDiffViewModel(gitEntry),
 			model: buildModelViewModel(this.#models.getState(options.providerId)),
 			voice: this.voiceViewModel(),
 			prompt: buildPromptViewModel({

@@ -207,3 +207,35 @@ export interface WireThreadSettingsUpdateParams {
 	model?: string;
 	effort?: string;
 }
+
+/**
+ * `ThreadItem` — only the two variants the deck reads.
+ *
+ * The enum is internally tagged on `type` and has sixteen variants; modelling
+ * the rest would be schema this side of the boundary has no use for.
+ */
+export interface WirePlanItem {
+	type: "plan";
+	id?: string;
+	text?: string;
+}
+
+export interface WireFileUpdateChange {
+	path?: string;
+	kind?: { type?: string };
+	/** Unified diff for this file. */
+	diff?: string;
+}
+
+export interface WireFileChangeItem {
+	type: "fileChange";
+	id?: string;
+	changes?: WireFileUpdateChange[];
+	status?: string;
+}
+
+export interface WireItemNotification {
+	threadId?: string;
+	turnId?: string;
+	item?: { type?: string } & Partial<WirePlanItem> & Partial<WireFileChangeItem>;
+}

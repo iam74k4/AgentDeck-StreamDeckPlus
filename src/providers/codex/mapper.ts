@@ -4,7 +4,8 @@
  * This is the boundary: above it nothing knows what a `RateLimitSnapshot` is.
  */
 
-import type { AgentSession, AgentSessionState } from "../../domain/session.js";
+import type { DiffSummary } from "../../domain/git.js";
+import type { AgentSession, AgentSessionState, PlanSummary } from "../../domain/session.js";
 import type { UsageWindow } from "../../domain/usage.js";
 import type {
 	WireAccount,
@@ -14,6 +15,8 @@ import type {
 	WireRateLimitSnapshot,
 	WireRateLimitWindow,
 	WireThread,
+	WireFileChangeItem,
+	WirePlanItem,
 	WireThreadStatus,
 	WireTurnStatus,
 	WireUserInput,
@@ -361,4 +364,76 @@ export function toWireUserInput(input: AgentInput): WireUserInput[] {
 		}
 	}
 	return items;
+}
+
+/**
+ * Reads `Plan n/m` out of a Codex plan item.
+ *
+ * The item carries free text rather than structured steps, and Codex renders its
+ * plan as a markdown checklist. Only checklist lines are counted: text with no
+ * checkboxes is prose, and reporting `Plan 0/0` for it would put a number on the
+ * deck that means nothing.
+ *
+ * Marked experimental upstream, so the shape may change — which is another
+ * reason to return `undefined` rather than guess.
+ */
+export function parsePlanProgress(item: WirePlanItem | undefined): PlanSummary | undefined {
+	const text = item?.text;
+	if (typeof text !== "string" || text.length === 0) {
+		return undefined;
+	}
+
+	let completedSteps = 0;
+	let totalSteps = 0;
+	for (const line of text.split("\n")) {
+		const match = /^\s*(?:[-*+]|\d+[.)])\s*\[( |x|X|✓|✔)\]/.exec(line);
+		if (match === null) {
+			continue;
+		}
+		totalSteps += 1;
+		if (match[1] !== " ") {
+			completedSteps += 1;
+		}
+	}
+
+	return totalSteps === 0 ? undefined : { completedSteps, totalSteps };
+}
+
+/**
+ * Counts the lines a Codex file-change item would add and remove.
+ *
+ * The item gives a unified diff per file, so the counts come from the diff body:
+ * `+`/`-` lines, excluding the `+++`/`---` headers, which are file names rather
+ * than content.
+ */
+export function fileChangeToDiffSummary(item: WireFileChangeItem | undefined): DiffSummary | undefined {
+	const changes = item?.changes;
+	if (!Array.isArray(changes) || changes.length === 0) {
+		return undefined;
+	}
+
+	let added = 0;
+	let removed = 0;
+	let fileCount = 0;
+	for (const change of changes) {
+		if (change === null || change === undefined || typeof change.path !== "string") {
+			continue;
+		}
+		fileCount += 1;
+		if (typeof change.diff !== "string") {
+			continue;
+		}
+		for (const line of change.diff.split("\n")) {
+			if (line.startsWith("+++") || line.startsWith("---")) {
+				continue;
+			}
+			if (line.startsWith("+")) {
+				added += 1;
+			} else if (line.startsWith("-")) {
+				removed += 1;
+			}
+		}
+	}
+
+	return fileCount === 0 ? undefined : { added, removed, fileCount };
 }

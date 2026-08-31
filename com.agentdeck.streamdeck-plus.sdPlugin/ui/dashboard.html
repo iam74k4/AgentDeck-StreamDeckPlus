@@ -13,9 +13,11 @@
 				<option value="">Auto (by dial position)</option>
 				<option value="usage">Usage</option>
 				<option value="agent">Agent</option>
+				<option value="session">Session</option>
 				<option value="model">Model / Reasoning</option>
 				<option value="prompt">Prompt</option>
 				<option value="git">Git</option>
+				<option value="diff">Diff Summary</option>
 				<option value="project">Project</option>
 				<option value="overview">AI Overview</option>
 				<option value="provider">Provider</option>
@@ -25,6 +27,11 @@
 		<p class="hint">
 			On a Model segment, rotating moves through the provider's models and reasoning levels and pressing
 			applies the highlighted one. Rotating alone changes nothing.
+		</p>
+		<p class="hint">
+			On a Session segment, rotating steps through the provider's sessions and pressing makes the highlighted
+			one active. Pressing the session that is already pinned releases the pin, so the deck goes back to
+			following whichever session is busiest.
 		</p>
 		<p class="hint">
 			On a Prompt segment, rotating selects a preset and pressing runs it — reading the clipboard, the

@@ -156,6 +156,7 @@ export function gitStatus(overrides: Partial<GitStatus> = {}): GitStatus {
 		conflicted: 0,
 		ahead: 1,
 		behind: 0,
+		diff: { added: 18, removed: 4, fileCount: 3 },
 		...overrides,
 	};
 }
@@ -165,6 +166,7 @@ export interface FakeRuntime {
 	provider: ControllableProvider;
 	contexts: DashboardContext[];
 	launched: string[];
+	gitStatusFor: (path: string, overrides: Partial<GitStatus>) => void;
 	/** What the fake desktop handed over, and what it was asked to do. */
 	captured: {
 		clipboard: string;
@@ -198,10 +200,12 @@ export function createFakeRuntime(
 
 	const usage = new UsageService(registry, { manualRefreshThrottleMs: 0 });
 	const sessions = new SessionService(registry);
+	/** Per-path overrides, so one test can vary what a repository reports. */
+	const gitOverrides = new Map<string, Partial<GitStatus>>();
 	const git = new GitService(
 		options.git ?? {
 			isRepository: async () => true,
-			getStatus: async (path) => gitStatus({ repositoryPath: path }),
+			getStatus: async (path) => gitStatus({ repositoryPath: path, ...(gitOverrides.get(path) ?? {}) }),
 		},
 		{ pollIntervalMs: 600_000 },
 	);
@@ -344,5 +348,13 @@ export function createFakeRuntime(
 		},
 	};
 
-	return { runtime, provider, contexts, launched, captured };
+	/**
+	 * Points a path at a different status. `diff: undefined` is meaningful — it
+	 * stands for a repository whose diff git could not read.
+	 */
+	const gitStatusFor = (path: string, overrides: Partial<GitStatus>): void => {
+		gitOverrides.set(path, "diff" in overrides ? overrides : { ...overrides });
+	};
+
+	return { runtime, provider, contexts, launched, captured, gitStatusFor };
 }

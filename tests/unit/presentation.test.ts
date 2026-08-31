@@ -27,6 +27,8 @@ import { buildAgentStatusViewModel, formatElapsed } from "@/presentation/view-mo
 import { buildUsageViewModel, formatResetIn } from "@/presentation/view-models/usage.js";
 import type { ApprovalRequest } from "@/domain/approval.js";
 import { buildApproveKeyViewModel, buildDenyKeyViewModel } from "@/presentation/view-models/approval.js";
+import { buildDiffViewModel } from "@/presentation/view-models/diff.js";
+import { buildSessionViewModel } from "@/presentation/view-models/session.js";
 import { buildGitViewModel } from "@/presentation/view-models/git.js";
 import { buildModelViewModel } from "@/presentation/view-models/model.js";
 import { buildPromptViewModel } from "@/presentation/view-models/prompt.js";
@@ -184,6 +186,7 @@ describe("key rendering", () => {
 				stateLabel: "IDLE",
 				detail: "",
 				color: "#fff",
+				plan: "",
 				interruptible: false,
 			}),
 		);
@@ -200,6 +203,7 @@ describe("key rendering", () => {
 					stateLabel,
 					detail: "",
 					color: "#2fbf71",
+					plan: "",
 					interruptible: false,
 				}),
 			);
@@ -232,6 +236,8 @@ describe("four-encoder coordination (design §6.2, instructions §8.3)", () => {
 		usage: buildUsageViewModel({ providerLabel: "Codex", snapshot: snapshot(), selection: { mode: "auto" } }),
 		agent: buildAgentStatusViewModel({ providerLabel: "Codex", providerStatus: "ready" }),
 		git: buildGitViewModel(undefined),
+		diff: buildDiffViewModel(undefined),
+		session: buildSessionViewModel({ total: 0 }),
 		model: buildModelViewModel({
 			providerId: "codex",
 			supported: true,

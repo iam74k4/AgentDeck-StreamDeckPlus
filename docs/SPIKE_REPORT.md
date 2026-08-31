@@ -655,3 +655,74 @@ Push-to-Talk は**押している間だけ**録音する。トグルにしなか
   コピーに対応していることが前提。対応していなければ空になる。
 - Windows 以外では desktop adapter は `NOT_CONFIGURED` を返し、キーは
   `SETUP` 相当のアラートになる（Pluginは動き続ける）。
+
+---
+
+## 10. v0.4 残項目 — Plan Progress / Diff Summary / Session Manager
+
+これでロードマップ v0.4 までの全項目が実装済みになった。
+
+### Plan Progress
+
+Codex の `plan` ThreadItem は**構造化されたステップではなく自由テキスト**で、
+かつ upstream で EXPERIMENTAL と明記されている。実際の描画は markdown の
+チェックリストなので、チェックリスト行だけを数える。
+
+チェックボックスが1つも無いテキストは「プランではない」と判断して
+`undefined` を返す。`Plan 0/0` をキーに出すのは、意味のない数字を
+置くことになるため。
+
+新しいTurnが始まったら `plan` と `diff` を落とす。前のTurnの `Plan 4/4` が
+次のTurn中も表示され続ける状態を作らないため。
+
+`Plan 2/4` は Touch Strip の detail 行に出す（設計書 §6.1）。キーの detail 行は
+経過時間が使う（§12.1）ので、両方が必要なときは `02:18 · Plan 2/4` と並べる。
+
+### Diff Summary — 2種類ある
+
+設計書は `DiffSummary` を §16（Git Integration）の §16.2 に置きつつ、
+`AgentSession` にも `diff?` を持たせている。これは別物なので両方実装した。
+
+| 出所                                    | 意味                   | 表示先            |
+| --------------------------------------- | ---------------------- | ----------------- |
+| `git diff --numstat HEAD`               | 作業ツリー全体の変更量 | Diff キー/Segment |
+| Codex `fileChange` item の unified diff | そのAgentが加えた変更  | Session Segment   |
+
+`DiffSummary` の定義は `domain/git.ts` へ置いた。git だけで生成できる概念で、
+実際そちらが主経路のため。
+
+**Untracked は含めない。** `git diff` はそもそも見ないし、デッキには既に
+`U:` として出ている。二重に数えるより、片方に寄せて説明できるほうがよい。
+
+**diff が読めなくてもブランチは失わない。** `git diff --numstat` が失敗しても
+`getStatus` は status を返す。Git キーの存在理由はブランチと件数であって、
+diff の欠落でそれを失うのは割に合わない。
+
+**「変更なし」と「読めなかった」を区別する。** 前者は `+0 -0 · clean`、
+後者は減光した `no diff`。同じ見た目にすると、git が壊れていることに
+気づけなくなる。
+
+### Session Manager
+
+設計書 §6.1 の Dial 2（回転=Session切替 / 押下=Active Session選択）を実装した。
+Model selector と同じ「回転はハイライト移動、押下で確定」の形にしている。
+デッキの脇を通るときにダイヤルに触れただけで STOP の対象が変わってしまう、
+という事態を作らないため。
+
+pin 済みのSessionをもう一度押すと pin が解除され、「最も忙しいSession」へ戻る。
+設定画面へ行かずに戻れる導線が要るため。
+
+pin 中のSessionが消えた場合は pin もハイライトも落とす。
+
+### 検出した不具合
+
+- **Segment順に依存したテストが2回壊れた。** `SEGMENT_KINDS` に項目を足すたび、
+  「agent の次は model」と決め打ちしたテストが落ちる。回転テストは
+  `cycleSegment` の結果と突き合わせる形に変えた（順序そのものは
+  `cycleSegment` 自身のテストが担保する）。
+
+### 残課題
+
+- 実機検証（[`DEVICE_TEST.md`](./DEVICE_TEST.md)）— v0.3 / v0.4 の
+  Push-to-Talk・Screenshot は実機が初回検証
+- v1.0 に向けた項目（設定Migration / Installer / Marketplace配布）

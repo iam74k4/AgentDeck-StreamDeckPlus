@@ -9,6 +9,7 @@
  */
 
 import type { AgentStatusViewModel } from "../view-models/agent-status.js";
+import type { DiffViewModel } from "../view-models/diff.js";
 import type { GitViewModel } from "../view-models/git.js";
 import type { ModelViewModel } from "../view-models/model.js";
 import type { OverviewViewModel } from "../view-models/overview.js";
@@ -16,6 +17,7 @@ import type { ProjectViewModel } from "../view-models/project.js";
 import type { PromptViewModel } from "../view-models/prompt.js";
 import type { VoiceViewModel } from "../view-models/voice.js";
 import type { ProviderViewModel } from "../view-models/provider.js";
+import type { SessionViewModel } from "../view-models/session.js";
 import type { UsageViewModel } from "../view-models/usage.js";
 import { Palette } from "../view-models/colors.js";
 import { fit } from "./key-renderer.js";
@@ -76,7 +78,10 @@ export function renderUsageSegment(vm: UsageViewModel): SegmentFeedback {
 }
 
 export function renderAgentSegment(vm: AgentStatusViewModel): SegmentFeedback {
-	const feedback = segment("AGENT", fit(vm.stateLabel, 12), fit(vm.detail, 20), vm.color);
+	// Design §6.1 puts `Plan 2/4` on the strip's detail row; §12.1 puts the
+	// elapsed time there. With both, both fit.
+	const detail = [vm.detail, vm.plan].filter((part) => part.length > 0).join(" · ");
+	const feedback = segment("AGENT", fit(vm.stateLabel, 12), fit(detail, 20), vm.color);
 	feedback.value.color = vm.color;
 	return feedback;
 }
@@ -113,6 +118,25 @@ export function renderOverviewSegment(vm: OverviewViewModel): SegmentFeedback {
 /** Design §6.1 — the MODEL column of the default touch strip. */
 export function renderModelSegment(vm: ModelViewModel): SegmentFeedback {
 	return segment("MODEL", fit(vm.title, 14), fit(vm.detail, 20), vm.color);
+}
+
+/**
+ * Design §6.1 dial 2 — rotate switches session, press makes it the active one.
+ *
+ * A pin marker rather than a colour change: the colour already carries the
+ * session's state, and pinned is a different question from busy.
+ */
+export function renderSessionSegment(vm: SessionViewModel): SegmentFeedback {
+	const title = [vm.pinned ? "SESSION ●" : "SESSION", vm.position]
+		.filter((part) => part.length > 0)
+		.join(" ");
+	return segment(title, fit(vm.name, 14), fit(vm.detail, 22), vm.color);
+}
+
+/** Design §16.2 — the size of the change, not the change. */
+export function renderDiffSegment(vm: DiffViewModel): SegmentFeedback {
+	const value = vm.removed.length > 0 ? `${vm.added} ${vm.removed}` : vm.added;
+	return segment("DIFF", fit(value, 14), fit(vm.detail, 22), vm.color);
 }
 
 /**

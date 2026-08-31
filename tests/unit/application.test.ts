@@ -14,6 +14,7 @@ import type { AgentProvider } from "@/providers/provider.js";
 import { Backoff, Throttle } from "@/infrastructure/backoff.js";
 import { SingleFlight } from "@/infrastructure/single-flight.js";
 import { resolveExecutable } from "@/infrastructure/executable.js";
+import { ControllableProvider } from "../helpers/fake-runtime.js";
 
 class FakeProvider implements AgentProvider {
 	public readonly displayName: string;
@@ -317,5 +318,104 @@ describe("infrastructure primitives", () => {
 	it("resolves an executable on PATH and reports a missing one", () => {
 		expect(resolveExecutable(process.execPath)).toBe(process.execPath);
 		expect(resolveExecutable("definitely-not-a-real-binary-xyz")).toBeUndefined();
+	});
+});
+
+describe("session highlight (design §6.1 dial 2)", () => {
+	function setup() {
+		const registry = new ProviderRegistry();
+		const provider = new ControllableProvider();
+		registry.register(provider);
+		const sessions = new SessionService(registry);
+		const push = (id: string, state: AgentSession["state"], updatedAt: number): void => {
+			provider.pushSession({ id, providerId: "codex", state, updatedAt: new Date(updatedAt) });
+		};
+		return { sessions, provider, push };
+	}
+
+	it("starts from the active session rather than the top of the list", () => {
+		const { sessions, push } = setup();
+		push("thr_b", "idle", 1);
+		push("thr_a", "working", 2);
+
+		// `thr_a` is busiest, so that is what the deck is already showing.
+		expect(sessions.getHighlighted("codex")?.id).toBe("thr_a");
+	});
+
+	it("rotates in a stable order and wraps both ways", () => {
+		const { sessions, push } = setup();
+		push("thr_a", "idle", 1);
+		push("thr_b", "idle", 2);
+		push("thr_c", "idle", 3);
+
+		const seen: (string | undefined)[] = [];
+		for (let step = 0; step < 4; step += 1) {
+			sessions.rotateHighlight("codex", 1);
+			seen.push(sessions.getHighlighted("codex")?.id);
+		}
+		// Four steps through three sessions must come back to where it started.
+		expect(seen[0]).toBe(seen[3]);
+
+		const before = sessions.getHighlighted("codex")?.id;
+		sessions.rotateHighlight("codex", -1);
+		sessions.rotateHighlight("codex", 1);
+		expect(sessions.getHighlighted("codex")?.id).toBe(before);
+	});
+
+	it("rotating alone does not change the active session", () => {
+		const { sessions, push } = setup();
+		push("thr_a", "working", 2);
+		push("thr_b", "idle", 1);
+
+		sessions.rotateHighlight("codex", 1);
+
+		expect(sessions.pinnedSessionId).toBeUndefined();
+		expect(sessions.getActiveSession("codex")?.id).toBe("thr_a");
+	});
+
+	it("pinning the highlighted session makes it the active one", () => {
+		const { sessions, push } = setup();
+		push("thr_a", "working", 2);
+		push("thr_b", "idle", 1);
+		sessions.rotateHighlight("codex", 1);
+
+		const pinned = sessions.pinHighlighted("codex");
+
+		expect(pinned?.id).toBe("thr_b");
+		expect(sessions.getActiveSession("codex")?.id).toBe("thr_b");
+	});
+
+	it("pinning the already pinned session releases it", () => {
+		const { sessions, push } = setup();
+		push("thr_a", "working", 2);
+		push("thr_b", "idle", 1);
+		sessions.rotateHighlight("codex", 1);
+		sessions.pinHighlighted("codex");
+
+		sessions.pinHighlighted("codex");
+
+		expect(sessions.pinnedSessionId).toBeUndefined();
+		expect(sessions.getActiveSession("codex")?.id).toBe("thr_a");
+	});
+
+	it("forgets a highlight whose session went away", () => {
+		const { sessions, provider, push } = setup();
+		push("thr_a", "working", 2);
+		push("thr_b", "idle", 1);
+		sessions.rotateHighlight("codex", 1);
+		expect(sessions.getHighlighted("codex")?.id).toBe("thr_b");
+
+		provider.emit({ type: "session-removed", sessionId: "thr_b" });
+
+		expect(sessions.getHighlighted("codex")?.id).toBe("thr_a");
+	});
+
+	it("does nothing when there is no session to rotate through", () => {
+		const { sessions } = setup();
+
+		sessions.rotateHighlight("codex", 1);
+
+		expect(sessions.getHighlighted("codex")).toBeUndefined();
+		expect(sessions.pinHighlighted("codex")).toBeUndefined();
 	});
 });

@@ -161,6 +161,21 @@
 			]
 		},
 		{
+			"UUID": "com.agentdeck.streamdeck-plus.diff",
+			"Name": "Diff Summary",
+			"Tooltip": "How large the working-tree change is: additions, removals, files.",
+			"Icon": "imgs/actions/diff/icon",
+			"Controllers": ["Keypad"],
+			"PropertyInspectorPath": "ui/diff.html",
+			"States": [
+				{
+					"Image": "imgs/actions/diff/key",
+					"TitleAlignment": "middle",
+					"ShowTitle": false
+				}
+			]
+		},
+		{
 			"UUID": "com.agentdeck.streamdeck-plus.project",
 			"Name": "Project",
 			"Tooltip": "Shows the active project. Press to switch to the next one.",

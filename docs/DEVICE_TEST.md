@@ -138,13 +138,27 @@ Turn開始はv0.3の作業なので、この節は該当機能が入るまで実
 - [ ] 送信が失敗した場合も一時ファイルが残らない
 - [ ] ログに画像パスや画像内容が出ない
 
-### 3.9 Profile切替 / 再接続
+### 3.9 Plan / Diff / Session（設計書 §3.5, §16.2, §6.1）
+
+- [ ] Agent が plan を出すと Touch Strip に `Plan 2/4` が表示される
+- [ ] 次のTurnが始まると前のTurnの `Plan` が消える
+- [ ] Diff キーに `+183 / -42 / 7 files` が表示される
+- [ ] 変更が無いとき `+0 / -0 / clean` になる
+- [ ] Git が diff を返せないとき `no diff` になり、Git キーはブランチを表示し続ける
+- [ ] Untracked ファイルは diff に含まれない（Git キーの `U:` に出る）
+- [ ] Encoder の Segment を Session にすると、回転でSessionが切り替わる
+- [ ] 回転しただけでは Active Session が変わらない（STOPの対象が変わらない）
+- [ ] 押下で Active Session が確定し、タイトルに `●` が付く
+- [ ] 同じSessionをもう一度押すとpinが解除され、最も忙しいSessionへ戻る
+- [ ] pin中のSessionが消えると、pinが解除されて落ちない
+
+### 3.10 Profile切替 / 再接続
 
 - [ ] Profileを切り替えてもEncoderの登録が壊れず、戻すと正しく再描画される
 - [ ] Stream Deckを抜き差ししてもPluginが落ちない
 - [ ] Stream Deckアプリを再起動してもPluginが復帰する
 
-### 3.10 Claude bridge
+### 3.11 Claude bridge
 
 - [ ] Claude Code の `statusLine` に bridge を設定し、Usage キーの Provider を
       Claude にすると % が表示される
@@ -155,7 +169,7 @@ Turn開始はv0.3の作業なので、この節は該当機能が入るまで実
 - [ ] Touch Strip の AI Overview に Claude と Codex が並び、合算されない
 - [ ] Provider を Claude にした STOP キーは点灯しない（制御チャネルが無いため）
 
-### 3.11 Failure（設計書 §26 Failure Test）
+### 3.12 Failure（設計書 §26 Failure Test）
 
 - [ ] Codex CLIが無い環境で `CLI?` と表示され、Pluginは動き続ける
 - [ ] Codex未ログイン時に `LOGIN` と表示される
@@ -165,7 +179,7 @@ Turn開始はv0.3の作業なので、この節は該当機能が入るまで実
 - [ ] Gitリポジトリでないパスを設定すると `NO GIT` と表示される
 - [ ] Active Sessionが無い状態でSTOPを押しても落ちず、アラート表示になる
 
-### 3.12 Security（指示書 §11）
+### 3.13 Security（指示書 §11）
 
 - [ ] `%appdata%\Elgato\StreamDeck\logs` のPluginログに
       OAuth Token / API Key / Authorization ヘッダが含まれない
