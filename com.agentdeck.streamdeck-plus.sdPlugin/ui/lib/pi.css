@@ -41,7 +41,8 @@ h1 {
 }
 
 .row > input,
-.row > select {
+.row > select,
+.row > textarea {
 	flex: 1 1 auto;
 	min-width: 0;
 	padding: 4px 6px;
@@ -50,6 +51,20 @@ h1 {
 	border: 1px solid var(--border);
 	border-radius: 3px;
 	font: inherit;
+}
+
+/* A preset list is edited as JSON, so it wants a monospace font and room. */
+.row > textarea {
+	resize: vertical;
+	font-family: Consolas, "Cascadia Mono", monospace;
+	line-height: 1.4;
+	white-space: pre;
+	overflow-wrap: normal;
+	overflow-x: auto;
+}
+
+.row > [aria-invalid="true"] {
+	border-color: #e5484d;
 }
 
 .row > input[type="checkbox"] {

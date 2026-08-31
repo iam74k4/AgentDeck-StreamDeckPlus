@@ -13,7 +13,7 @@
 
 import type { GitStatusEntry } from "../../application/git-service.js";
 import { errorBadge } from "../../domain/errors.js";
-import { isEmptyDiff } from "../../domain/git.js";
+import { hasChanges } from "../../domain/git.js";
 import { Palette } from "./colors.js";
 
 export interface DiffViewModel {
@@ -40,7 +40,7 @@ export function buildDiffViewModel(entry: GitStatusEntry | undefined): DiffViewM
 	}
 
 	const diff = entry.status.diff;
-	if (isEmptyDiff(diff)) {
+	if (!hasChanges(diff)) {
 		// A clean tree and a diff git could not read are different things, and the
 		// deck should not let them look the same.
 		return {

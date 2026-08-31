@@ -168,7 +168,9 @@ export class UiCoordinator {
 		const session = this.#sessions.getActiveSession(options.providerId);
 		// The Session dial follows its own highlight; every other segment follows
 		// whichever session is active (design §6.1 dial 2).
-		const sessions = this.#sessions.list(options.providerId);
+		// The same order the dial rotates through, so the position it shows and the
+		// step it takes cannot disagree.
+		const sessions = this.#sessions.ordered(options.providerId);
 		const highlighted = this.#sessions.getHighlighted(options.providerId);
 		const now = this.#now();
 		const active = this.#projects.getActive();

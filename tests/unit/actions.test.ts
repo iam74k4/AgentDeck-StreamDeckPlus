@@ -872,6 +872,29 @@ describe("session dial (design §6.1 dial 2)", () => {
 		expect(fake.runtime.sessions.getActiveSession("codex")?.id).toBe("thr_a");
 	});
 
+	it("the position it shows advances by one for each step it takes", async () => {
+		const action = new DashboardEncoderAction(fake.runtime);
+		const dial = new FakeDial();
+		// Arrival order is not sorted order, and is not a rotation of it either —
+		// which is when reading the position from the wrong list starts to jump.
+		for (const id of ["thr_b", "thr_a", "thr_c"]) {
+			fake.provider.pushSession({ id, providerId: "codex", state: "idle", updatedAt: new Date(1) });
+		}
+		await action.onWillAppear(appear(dial, { segment: "session" }, 0));
+
+		const positions: number[] = [];
+		for (let step = 0; step < 4; step += 1) {
+			await action.onDialRotate(rotate(dial, { segment: "session" }, 1, 0));
+			positions.push(Number(/(\d+)\/3$/.exec(String(dial.lastTitle))?.[1]));
+		}
+
+		// One step of the dial is one step of the counter, every time.
+		for (let step = 1; step < positions.length; step += 1) {
+			const previous = positions[step - 1] as number;
+			expect(positions[step]).toBe((previous % 3) + 1);
+		}
+	});
+
 	it("shows plan progress on the session it is following", async () => {
 		const action = new DashboardEncoderAction(fake.runtime);
 		const dial = new FakeDial();

@@ -43,6 +43,35 @@
 			Claude Code has no control channel, so prompts can only be sent to Codex. Clipboard, selection and
 			screenshot capture need Windows.
 		</p>
+		<fieldset>
+			<legend>Presets</legend>
+			<div class="row">
+				<label for="presets">Definitions</label>
+				<textarea
+					id="presets"
+					rows="10"
+					spellcheck="false"
+					placeholder="(using the built-in presets)"
+					data-setting="promptPresets"
+					data-scope="global"
+					data-type="json"
+				></textarea>
+			</div>
+			<p class="hint" data-error-for="presets" hidden>
+				That is not valid JSON, so nothing was saved. Your text is still here — fix it and it will save.
+			</p>
+			<p class="hint">
+				A JSON array. Each entry needs <code>id</code>, <code>name</code>, <code>template</code>,
+				<code>inputSource</code> (<code>none</code>, <code>clipboard</code>, <code>selection</code>,
+				<code>screenshot</code>) and <code>target</code> (<code>active-session</code>,
+				<code>new-session</code>, <code>clipboard</code>). <code>{{input}}</code> in the template is where the
+				captured input goes; without it the input is appended.
+			</p>
+			<p class="hint">
+				Empty restores the built-in presets. These are shared by the Prompt key and dial, Push-to-Talk and
+				Screenshot to AI.
+			</p>
+		</fieldset>
 		<script src="lib/pi.js"></script>
 	</body>
 </html>

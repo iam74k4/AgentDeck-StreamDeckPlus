@@ -9,12 +9,14 @@
  */
 
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { Readable, Writable } from "node:stream";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { WindowsClipboard } from "@/adapters/desktop/clipboard.js";
 import { isWindows, requireWindows, type HostShell } from "@/adapters/desktop/host-shell.js";
 import { WindowsScreenshot } from "@/adapters/desktop/screenshot.js";
+import { SystemSpeechVoiceProvider } from "@/adapters/desktop/voice.js";
 import { MAX_INPUT_CHARACTERS } from "@/domain/prompt.js";
 import { createLogger, type LogSink } from "@/infrastructure/logger.js";
 
@@ -135,5 +137,90 @@ describe("WindowsScreenshot", () => {
 	it("refuses to run off Windows", async () => {
 		const capture = new WindowsScreenshot({ platform: "linux", shell: ok("") });
 		await expect(capture.capture("full-screen")).rejects.toMatchObject({ code: "NOT_CONFIGURED" });
+	});
+});
+
+describe("SystemSpeechVoiceProvider", () => {
+	function deadRecogniser(exit: { code: number | null; error?: unknown }) {
+		return {
+			pid: 1,
+			stdin: new Writable({ write: (_chunk, _encoding, done) => done() }),
+			stdout: Readable.from([]),
+			stderr: Readable.from([]),
+			exited: Promise.resolve({ ...exit, signal: null }),
+			running: false,
+			shutdown: async () => ({ ...exit, signal: null }),
+		};
+	}
+
+	function liveRecogniser(phrases: string[]) {
+		return {
+			pid: 1,
+			stdin: new Writable({ write: (_chunk, _encoding, done) => done() }),
+			stdout: Readable.from([`${phrases.join("\n")}\n`]),
+			stderr: Readable.from([]),
+			exited: new Promise<never>(() => {}),
+			running: true,
+			shutdown: async () => ({ code: 0, signal: null }),
+		};
+	}
+
+	it("reports a recogniser that exited instead of calling it silence", async () => {
+		// No microphone, or System.Speech missing: the script throws and exits. The
+		// deck must not answer that with "nothing was recognised".
+		const provider = new SystemSpeechVoiceProvider({
+			platform: "win32",
+			spawn: () => deadRecogniser({ code: 1 }) as never,
+		});
+
+		await provider.start();
+		await vi.waitFor(() => expect(provider.recording).toBe(true));
+		await new Promise((resolve) => setTimeout(resolve, 20));
+
+		await expect(provider.stop()).rejects.toMatchObject({ code: "NOT_CONFIGURED" });
+	});
+
+	it("still returns whatever it did recognise before dying", async () => {
+		const child = {
+			...deadRecogniser({ code: 1 }),
+			stdout: Readable.from(["check the parser\n"]),
+		};
+		const provider = new SystemSpeechVoiceProvider({
+			platform: "win32",
+			spawn: () => child as never,
+		});
+
+		await provider.start();
+		await new Promise((resolve) => setTimeout(resolve, 20));
+
+		await expect(provider.stop()).resolves.toMatchObject({ text: "check the parser" });
+	});
+
+	it("terminates quickly, because a key release must not wait (design §27)", async () => {
+		let grace: number | undefined;
+		const provider = new SystemSpeechVoiceProvider({
+			platform: "win32",
+			spawn: (options) => {
+				grace = options.shutdownGraceMs;
+				return liveRecogniser(["hello"]) as never;
+			},
+		});
+
+		await provider.start();
+
+		// The script polls rather than reading stdin, so closing stdin does not
+		// stop it; the default three-second grace would be three seconds of
+		// nothing happening after the user let go.
+		expect(grace).toBeLessThanOrEqual(500);
+	});
+
+	it("refuses to record off Windows", async () => {
+		const provider = new SystemSpeechVoiceProvider({ platform: "linux" });
+		await expect(provider.start()).rejects.toMatchObject({ code: "NOT_CONFIGURED" });
+	});
+
+	it("reports nothing to stop when it was not recording", async () => {
+		const provider = new SystemSpeechVoiceProvider({ platform: "win32" });
+		await expect(provider.stop()).rejects.toMatchObject({ code: "INTERRUPTED" });
 	});
 });

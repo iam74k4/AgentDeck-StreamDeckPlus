@@ -182,3 +182,18 @@ describe("VoiceService", () => {
 		expect(listener).toHaveBeenCalledTimes(3);
 	});
 });
+
+describe("shutdown", () => {
+	it("closes the microphone before the plugin goes away", async () => {
+		// The recogniser is a child process holding the microphone; leaving it
+		// running past `process.exit` orphans it with the mic open.
+		const microphone = new FakeMicrophone();
+		const { voice } = setup({ microphone });
+		await voice.start();
+		expect(microphone.recording).toBe(true);
+
+		await voice.cancel();
+
+		expect(microphone.recording).toBe(false);
+	});
+});

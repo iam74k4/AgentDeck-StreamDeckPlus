@@ -45,6 +45,23 @@ export interface PromptServiceOptions {
 
 export type PromptListener = () => void;
 
+function samePresets(left: readonly PromptPreset[], right: readonly PromptPreset[]): boolean {
+	return (
+		left.length === right.length &&
+		left.every((preset, index) => {
+			const other = right[index];
+			return (
+				other !== undefined &&
+				preset.id === other.id &&
+				preset.name === other.name &&
+				preset.template === other.template &&
+				preset.inputSource === other.inputSource &&
+				preset.target === other.target
+			);
+		})
+	);
+}
+
 export class PromptService {
 	readonly #sessions: SessionService;
 	readonly #logger: Logger | undefined;
@@ -76,7 +93,14 @@ export class PromptService {
 	 */
 	public setPresets(presets: readonly unknown[]): void {
 		const usable = presets.filter(isPromptPreset);
-		this.#presets = usable.length > 0 ? usable : [...DEFAULT_PROMPT_PRESETS];
+		const next = usable.length > 0 ? usable : [...DEFAULT_PROMPT_PRESETS];
+		// Global settings are rewritten whenever a project changes, so this is
+		// called far more often than the presets actually change; repainting every
+		// time would be churn for nothing.
+		if (samePresets(this.#presets, next)) {
+			return;
+		}
+		this.#presets = next;
 		this.#selectedIndex = Math.min(this.#selectedIndex, this.#presets.length - 1);
 		this.#notify();
 	}
@@ -127,16 +151,19 @@ export class PromptService {
 			throw new AgentDeckError("NOT_CONFIGURED", "There is no prompt preset to run.");
 		}
 
-		const supplied = options.text?.trim();
-		// A caller-supplied transcript stands in for the preset's input source: a
+		// A caller-supplied transcript stands in for the preset's *text* capture: a
 		// spoken instruction is the input, and re-reading the clipboard on top of
-		// it would send something the user did not say.
-		if (supplied !== undefined && supplied.length > 0) {
-			return this.#dispatch(preset, renderPrompt(preset.template, clampInput(supplied)), [], options);
-		}
+		// it would send something the user did not say. It does not stand in for a
+		// screenshot — "Explain Screen" spoken into the microphone still needs the
+		// screen, or the agent is asked about a picture it never got.
+		const supplied = options.text?.trim();
+		const hasSupplied = supplied !== undefined && supplied.length > 0;
 
 		if (preset.inputSource === "screenshot") {
-			return this.#runWithScreenshot(preset, options);
+			return this.#runWithScreenshot(preset, options, hasSupplied ? clampInput(supplied) : "");
+		}
+		if (hasSupplied) {
+			return this.#dispatch(preset, renderPrompt(preset.template, clampInput(supplied)), [], options);
 		}
 
 		const captured = await this.#captureText(preset);
@@ -146,6 +173,7 @@ export class PromptService {
 	async #runWithScreenshot(
 		preset: PromptPreset,
 		options: { providerId?: ProviderId; cwd?: string; screenshotMode?: ScreenshotMode },
+		text: string,
 	): Promise<PromptRunResult> {
 		const capture = this.#options.screenshot;
 		if (capture === undefined) {
@@ -155,14 +183,16 @@ export class PromptService {
 			options.screenshotMode ?? this.#options.screenshotMode ?? "active-window",
 		);
 		try {
-			return await this.#dispatch(preset, renderPrompt(preset.template, ""), [shot.path], options);
+			return await this.#dispatch(preset, renderPrompt(preset.template, text), [shot.path], options);
 		} finally {
 			// Design §22.4 — the temporary file does not outlive the send, whether
 			// or not the send worked.
 			try {
 				await shot.dispose();
-			} catch (error) {
-				this.#logger?.debug("could not remove the screenshot", error);
+			} catch {
+				// Not the error object: its message carries the file's path, and
+				// design §21.2 keeps screenshot paths out of the log.
+				this.#logger?.debug("could not remove the screenshot");
 			}
 		}
 	}

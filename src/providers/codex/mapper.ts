@@ -407,23 +407,34 @@ export function parsePlanProgress(item: WirePlanItem | undefined): PlanSummary |
  * than content.
  */
 export function fileChangeToDiffSummary(item: WireFileChangeItem | undefined): DiffSummary | undefined {
+	const counts = fileChangeCounts(item);
+	return counts === undefined ? undefined : summariseFileCounts(counts);
+}
+
+/** Lines added and removed, per file path. */
+export type FileChangeCounts = Map<string, { added: number; removed: number }>;
+
+/**
+ * Per-path counts from one Codex file-change item.
+ *
+ * Kept per path so a turn's items can be merged: two items patching two files
+ * are two files, and two items patching the *same* file is still one.
+ */
+export function fileChangeCounts(item: WireFileChangeItem | undefined): FileChangeCounts | undefined {
 	const changes = item?.changes;
 	if (!Array.isArray(changes) || changes.length === 0) {
 		return undefined;
 	}
 
-	let added = 0;
-	let removed = 0;
-	let fileCount = 0;
+	const counts: FileChangeCounts = new Map();
 	for (const change of changes) {
 		if (change === null || change === undefined || typeof change.path !== "string") {
 			continue;
 		}
-		fileCount += 1;
-		if (typeof change.diff !== "string") {
-			continue;
-		}
-		for (const line of change.diff.split("\n")) {
+		let added = 0;
+		let removed = 0;
+		for (const line of typeof change.diff === "string" ? change.diff.split("\n") : []) {
+			// `+++`/`---` name the files rather than changing lines.
 			if (line.startsWith("+++") || line.startsWith("---")) {
 				continue;
 			}
@@ -433,7 +444,18 @@ export function fileChangeToDiffSummary(item: WireFileChangeItem | undefined): D
 				removed += 1;
 			}
 		}
+		counts.set(change.path, { added, removed });
 	}
 
-	return fileCount === 0 ? undefined : { added, removed, fileCount };
+	return counts.size === 0 ? undefined : counts;
+}
+
+export function summariseFileCounts(counts: FileChangeCounts): DiffSummary {
+	let added = 0;
+	let removed = 0;
+	for (const entry of counts.values()) {
+		added += entry.added;
+		removed += entry.removed;
+	}
+	return { added, removed, fileCount: counts.size };
 }

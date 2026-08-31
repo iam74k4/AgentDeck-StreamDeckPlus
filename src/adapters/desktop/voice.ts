@@ -25,6 +25,9 @@ import { spawnManagedProcess, type ManagedProcess } from "../../infrastructure/p
 import { clampInput } from "../../domain/prompt.js";
 import { requireWindows } from "./host-shell.js";
 
+/** Design §27 targets a 100ms local response; a key release must not wait. */
+const SHUTDOWN_GRACE_MS = 250;
+
 export interface VoiceResult {
 	text: string;
 	durationMs: number;
@@ -84,6 +87,8 @@ export class SystemSpeechVoiceProvider implements VoiceInputProvider {
 	#process: ManagedProcess | undefined;
 	#transcript: string[] = [];
 	#startedAt = 0;
+	/** Set when the recogniser exited on its own, which is never a good sign. */
+	#failure: AgentDeckError | undefined;
 
 	public constructor(options: SystemSpeechVoiceOptions = {}) {
 		this.#logger = options.logger?.child("voice");
@@ -105,10 +110,16 @@ export class SystemSpeechVoiceProvider implements VoiceInputProvider {
 		}
 
 		this.#transcript = [];
+		this.#failure = undefined;
 		this.#startedAt = this.#now();
 		const child = this.#spawn({
 			command: this.#executable,
 			args: ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", RECOGNISE_SCRIPT],
+			// The script polls rather than reading stdin, so closing stdin will not
+			// stop it and the default three-second grace would be three seconds
+			// between releasing the key and the prompt being sent. Terminate quickly
+			// instead: push-to-talk is over the moment the finger lifts.
+			shutdownGraceMs: SHUTDOWN_GRACE_MS,
 			...(this.#logger === undefined ? {} : { logger: this.#logger }),
 		});
 
@@ -134,10 +145,18 @@ export class SystemSpeechVoiceProvider implements VoiceInputProvider {
 			}
 		});
 
+		// A recogniser that exits by itself has failed: there is no microphone, or
+		// System.Speech is not installed. Without this, `stop()` returns an empty
+		// transcript and the deck reports silence for a microphone that never
+		// opened — the same answer for two very different problems.
 		void child.exited.then((exit) => {
-			if (this.#process === child && exit.error !== undefined) {
-				this.#logger?.warn("speech recogniser could not start", exit.error);
+			if (this.#process !== child) {
+				return;
 			}
+			this.#failure =
+				exit.error ??
+				new AgentDeckError("NOT_CONFIGURED", "The speech recogniser stopped. Is a microphone available?");
+			this.#logger?.warn(`speech recogniser exited early: ${this.#failure.code}`);
 		});
 
 		this.#process = child;
@@ -155,6 +174,14 @@ export class SystemSpeechVoiceProvider implements VoiceInputProvider {
 		const durationMs = Math.max(0, this.#now() - this.#startedAt);
 		const text = clampInput(this.#transcript.join(" ").trim());
 		this.#transcript = [];
+
+		const failure = this.#failure;
+		this.#failure = undefined;
+		// Anything it did manage to recognise is still worth sending; only a
+		// failure with nothing to show for it is reported as one.
+		if (failure !== undefined && text.length === 0) {
+			throw failure;
+		}
 
 		// The length, never the words (instructions §11).
 		this.#logger?.info(`recording stopped after ${durationMs}ms`);

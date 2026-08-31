@@ -35,6 +35,9 @@
 		send({ event: "setGlobalSettings", context: uuid, payload: globalSettings });
 	}
 
+	/** Returned by `coerce` when the field cannot be saved as typed. */
+	var INVALID = {};
+
 	function coerce(element) {
 		if (element.type === "checkbox") {
 			return element.checked;
@@ -43,7 +46,35 @@
 			var parsed = Number.parseFloat(element.value);
 			return Number.isFinite(parsed) ? parsed : undefined;
 		}
+		if (element.dataset.type === "json") {
+			if (element.value.trim() === "") {
+				return undefined;
+			}
+			try {
+				return JSON.parse(element.value);
+			} catch {
+				// Half-typed JSON must not overwrite a working list.
+				return INVALID;
+			}
+		}
 		return element.value === "" ? undefined : element.value;
+	}
+
+	/**
+	 * Marks a field the user is part-way through, without discarding their text.
+	 *
+	 * The message is found by id rather than by walking up from the field, so it
+	 * can sit wherever it reads best rather than having to be a sibling.
+	 */
+	function setValidity(element, valid) {
+		element.setAttribute("aria-invalid", valid ? "false" : "true");
+		if (!element.id) {
+			return;
+		}
+		var message = document.querySelector('[data-error-for="' + element.id + '"]');
+		if (message) {
+			message.hidden = valid;
+		}
 	}
 
 	function applyTo(element) {
@@ -57,12 +88,22 @@
 			element.checked = value === true;
 			return;
 		}
+		if (element.dataset.type === "json") {
+			element.value = value === undefined || value === null ? "" : JSON.stringify(value, null, 2);
+			setValidity(element, true);
+			return;
+		}
 		element.value = value === undefined || value === null ? "" : String(value);
 	}
 
 	function writeBack(element) {
 		var key = element.dataset.setting;
 		var value = coerce(element);
+		if (value === INVALID) {
+			setValidity(element, false);
+			return;
+		}
+		setValidity(element, true);
 		var isGlobal = element.dataset.scope === "global";
 		var next = Object.assign({}, isGlobal ? globalSettings : settings);
 		if (value === undefined) {

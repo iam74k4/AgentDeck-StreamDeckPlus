@@ -739,6 +739,58 @@ describe("plan and diff on a live session (design §3.5, §16.2)", () => {
 		expect(provider.sessions[0]?.plan).toBeUndefined();
 	});
 
+	it("does not drop an established plan when the next plan item starts streaming", async () => {
+		// `item/started` carries the same item as `item/completed`, and a plan's
+		// text streams in as deltas — so the started notification arrives with text
+		// that has no checklist in it yet.
+		const provider = createProvider({
+			FAKE_SCRIPT: JSON.stringify([
+				item(10, "thr_1", { type: "plan", id: "p1", text: "- [x] one\n- [ ] two" }),
+				{
+					delayMs: 20,
+					method: "item/started",
+					params: { threadId: "thr_1", turnId: "turn_1", item: { type: "plan", id: "p2", text: "" } },
+				},
+			]),
+		});
+		await provider.start();
+		await waitFor(() => provider.sessions[0]?.plan !== undefined);
+
+		// Give the started notification time to arrive and do its damage.
+		await waitFor(() => provider.sessions[0]!.updatedAt.getTime() > 0 && true);
+		await new Promise((resolve) => setTimeout(resolve, 120));
+
+		expect(provider.sessions[0]?.plan).toEqual({ completedSteps: 1, totalSteps: 2 });
+	});
+
+	it("adds up the files a turn touched, without double-counting a re-edit", async () => {
+		const provider = createProvider({
+			FAKE_SCRIPT: JSON.stringify([
+				item(10, "thr_1", {
+					type: "fileChange",
+					id: "i1",
+					changes: [{ path: "src/a.ts", kind: { type: "update" }, diff: "+one\n+two\n" }],
+				}),
+				item(10, "thr_1", {
+					type: "fileChange",
+					id: "i2",
+					changes: [{ path: "src/b.ts", kind: { type: "add" }, diff: "+only\n" }],
+				}),
+				// The agent comes back to the first file; its counts replace, not add.
+				item(10, "thr_1", {
+					type: "fileChange",
+					id: "i3",
+					changes: [{ path: "src/a.ts", kind: { type: "update" }, diff: "+one\n+two\n+three\n-gone\n" }],
+				}),
+			]),
+		});
+		await provider.start();
+		// Waiting on the file count alone would race the third item.
+		await waitFor(() => provider.sessions[0]?.diff?.removed === 1);
+
+		expect(provider.sessions[0]?.diff).toEqual({ added: 4, removed: 1, fileCount: 2 });
+	});
+
 	it("ignores an item for a session it does not know", async () => {
 		const provider = createProvider({
 			FAKE_SCRIPT: JSON.stringify([item(10, "thr_unknown", { type: "plan", id: "p", text: "- [ ] one" })]),

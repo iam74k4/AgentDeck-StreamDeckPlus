@@ -143,6 +143,9 @@ and rotating selects a preset while pressing runs it, or pin one to a Prompt key
 The same presets are what Push-to-Talk and Screenshot → AI send through, so there
 is one place that decides what reaches an agent.
 
+Edit them as JSON from the Prompt key's inspector. Invalid JSON is not saved and
+your text is left alone; an empty field restores the built-in presets.
+
 Input is captured on the press and never on a timer, and it is capped at 20,000
 characters so a stray Ctrl+A cannot become a multi-megabyte prompt. Nothing that
 was captured — clipboard text, a transcript, an image — is ever written to a log
@@ -151,7 +154,9 @@ line, at any level.
 ## Voice and screen input
 
 **Push to Talk** records while the key is held and sends the transcript when you
-release it. Recognition is done by Windows' own recogniser on your machine:
+release it. A recogniser that will not start — no microphone, no speech
+support — is reported as a failure rather than as silence, so "nothing was
+recognised" always means exactly that. Recognition is done by Windows' own recogniser on your machine:
 AgentDeck sends no audio anywhere, keeps no recording, and writes neither the
 audio nor the transcript to disk or to the log. The deck shows `LISTENING` for
 exactly as long as the microphone is open, on the key and on the touch strip, and

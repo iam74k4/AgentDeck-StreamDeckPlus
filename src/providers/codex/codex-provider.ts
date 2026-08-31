@@ -27,6 +27,7 @@ import {
 } from "../../infrastructure/process-manager.js";
 import { scheduleInterval, type ScheduledTask } from "../../infrastructure/scheduler.js";
 import type { AgentInput, AgentProvider, ProviderLifecycleState } from "../provider.js";
+import type { FileChangeCounts } from "./mapper.js";
 import { AppServerClient } from "./app-server-client.js";
 import { parseApprovalRequest, toApprovalResponse } from "./approval-mapper.js";
 import { JsonRpcTransport } from "./json-rpc.js";
@@ -34,12 +35,13 @@ import {
 	applyFullRateLimits,
 	applyRateLimitsUpdate,
 	createRateLimitState,
-	fileChangeToDiffSummary,
+	fileChangeCounts,
 	isAuthenticatedAccount,
 	parsePlanProgress,
 	isRateLimitReached,
 	threadStatusToSessionState,
 	toUsageWindows,
+	summariseFileCounts,
 	turnStatusToSessionState,
 	toWireUserInput,
 	wireModelToDescriptor,
@@ -144,6 +146,8 @@ export class CodexProvider implements AgentProvider {
 	readonly #listeners = new Set<ProviderEventListener>();
 	readonly #sessions = new Map<string, AgentSession>();
 	readonly #approvals = new Map<string, PendingApproval>();
+	/** Per-session, per-path line counts for the current turn (design §3.5). */
+	readonly #turnChanges = new Map<string, FileChangeCounts>();
 	readonly #backoff: Backoff;
 	readonly #spawn: typeof spawnManagedProcess;
 	readonly #resolve: typeof resolveExecutable;
@@ -697,6 +701,11 @@ export class CodexProvider implements AgentProvider {
 					this.#onTurnCompleted(params as WireTurnNotification);
 					return;
 				case CodexNotification.ItemStarted:
+					// A started item is only proof the session is alive. Its content is
+					// still streaming — a plan item arrives with no checklist in it yet —
+					// so reading it would wipe what the last completed item established.
+					this.#touchSession((params as WireItemNotification | undefined)?.threadId);
+					return;
 				case CodexNotification.ItemCompleted:
 					this.#onItem(params as WireItemNotification | undefined);
 					return;
@@ -765,6 +774,7 @@ export class CodexProvider implements AgentProvider {
 		};
 		delete next.plan;
 		delete next.diff;
+		this.#turnChanges.delete(threadId);
 		this.#upsertSession(next, { emit: true });
 	}
 
@@ -795,11 +805,20 @@ export class CodexProvider implements AgentProvider {
 	/**
 	 * Design §3.5 — `Plan 2/4` and `+142 -38`.
 	 *
-	 * Two item kinds carry something the deck shows; the rest only prove the
-	 * session is alive. A file-change item replaces the session's diff rather than
-	 * accumulating: Codex reports the patch it is applying, and adding successive
-	 * patches together would double-count a file edited twice in one turn.
+	 * Only completed items are read: see the `item/started` branch above.
+	 *
+	 * File changes accumulate per path rather than replacing wholesale. A turn that
+	 * patches two files sends two items, so replacing would report only the second;
+	 * summing would double-count a file the agent edits twice. Keeping the latest
+	 * count per path does neither.
 	 */
+	#touchSession(threadId: string | undefined): void {
+		const existing = typeof threadId === "string" ? this.#sessions.get(threadId) : undefined;
+		if (existing !== undefined) {
+			this.#upsertSession({ ...existing, updatedAt: new Date() }, { emit: true });
+		}
+	}
+
 	#onItem(params: WireItemNotification | undefined): void {
 		const threadId = params?.threadId;
 		if (typeof threadId !== "string") {
@@ -821,9 +840,14 @@ export class CodexProvider implements AgentProvider {
 				next.plan = plan;
 			}
 		} else if (item?.type === "fileChange") {
-			const diff = fileChangeToDiffSummary(item as WireFileChangeItem);
-			if (diff !== undefined) {
-				next.diff = diff;
+			const counts = fileChangeCounts(item as WireFileChangeItem);
+			if (counts !== undefined) {
+				const merged = this.#turnChanges.get(threadId) ?? new Map();
+				for (const [path, lines] of counts) {
+					merged.set(path, lines);
+				}
+				this.#turnChanges.set(threadId, merged);
+				next.diff = summariseFileCounts(merged);
 			}
 		}
 
@@ -929,6 +953,8 @@ export class CodexProvider implements AgentProvider {
 	}
 
 	#markSessionsDisconnected(): void {
+		// Whatever a turn was part-way through changing is no longer being changed.
+		this.#turnChanges.clear();
 		const now = new Date();
 		for (const [id, session] of this.#sessions) {
 			if (session.state === "disconnected") {

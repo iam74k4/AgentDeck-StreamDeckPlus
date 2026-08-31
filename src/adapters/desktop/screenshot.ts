@@ -40,6 +40,15 @@ const CAPTURE_SCRIPT = `
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName System.Windows.Forms
+# Without this the process sees virtualised coordinates on a scaled display, and
+# the capture comes back cropped to the top-left fraction of the window.
+Add-Type -TypeDefinition @'
+using System.Runtime.InteropServices;
+public static class AgentDeckDpi {
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+}
+'@
+[void][AgentDeckDpi]::SetProcessDPIAware()
 if ($env:AGENTDECK_SHOT_MODE -eq 'active-window') {
   Add-Type -TypeDefinition @'
 using System;

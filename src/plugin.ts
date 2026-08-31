@@ -118,9 +118,11 @@ async function applyGlobalSettings(settings: AgentDeckGlobalSettings): Promise<v
 	logger.setLevel(level);
 	streamDeck.logger.setLevel(level);
 
-	if (Array.isArray(settings.promptPresets)) {
-		runtime.prompts.setPresets(settings.promptPresets as unknown[]);
-	}
+	// An empty field means "use the built-in presets", so an absent value has to
+	// reset rather than leave the last edit in place until the plugin restarts.
+	runtime.prompts.setPresets(
+		Array.isArray(settings.promptPresets) ? (settings.promptPresets as unknown[]) : [],
+	);
 
 	runtime.git.setPollInterval(
 		typeof settings.gitPollIntervalMs === "number" ? settings.gitPollIntervalMs : undefined,

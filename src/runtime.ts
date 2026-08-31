@@ -256,7 +256,10 @@ export function createRuntime(options: RuntimeOptions): AgentDeckRuntime {
 			releaseTick = undefined;
 			ui.dispose();
 			projects.dispose();
-			void voice.cancel();
+			// Awaited, not fired and forgotten: the recogniser is a child process
+			// holding the microphone, and `process.exit` follows this closely enough
+			// that an unawaited shutdown can leave it running.
+			await voice.cancel();
 			voice.dispose();
 			prompts.dispose();
 			models.dispose();

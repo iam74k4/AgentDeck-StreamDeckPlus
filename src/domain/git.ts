@@ -71,8 +71,9 @@ export function formatDiffSummary(diff: DiffSummary | undefined): string {
 	return `+${diff.added} -${diff.removed} · ${files}`;
 }
 
-export function isEmptyDiff(diff: DiffSummary | undefined): boolean {
-	return diff === undefined || diff.fileCount === 0;
+/** True when there is a diff and it actually has something in it. */
+export function hasChanges(diff: DiffSummary | undefined): diff is DiffSummary {
+	return diff !== undefined && diff.fileCount > 0;
 }
 
 /**

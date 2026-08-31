@@ -107,8 +107,18 @@ export class SessionService {
 		return highlighted ?? this.getActiveSession(providerId);
 	}
 
+	/**
+	 * The sessions in the order the dial steps through them.
+	 *
+	 * Public because the segment shows a position — `2/3` — and reading that from
+	 * the unordered list made the number jump around as the dial moved.
+	 */
+	public ordered(providerId?: ProviderId): AgentSession[] {
+		return this.list(providerId).sort((left, right) => left.id.localeCompare(right.id));
+	}
+
 	public rotateHighlight(providerId: ProviderId | undefined, delta: number): void {
-		const candidates = this.#ordered(providerId);
+		const candidates = this.ordered(providerId);
 		if (candidates.length === 0) {
 			return;
 		}
@@ -131,11 +141,6 @@ export class SessionService {
 		this.#pinnedSessionId = this.#pinnedSessionId === highlighted.id ? undefined : highlighted.id;
 		this.#notify();
 		return highlighted;
-	}
-
-	/** Stable rotation order: a dial that reorders under the finger is unusable. */
-	#ordered(providerId?: ProviderId): AgentSession[] {
-		return this.list(providerId).sort((left, right) => left.id.localeCompare(right.id));
 	}
 
 	public get pinnedSessionId(): string | undefined {

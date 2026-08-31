@@ -208,6 +208,18 @@ describe("PromptService", () => {
 		expect(prompts.list().map((entry) => entry.id)).toEqual(["explain"]);
 	});
 
+	it("does not repaint when the presets are set to what they already are", () => {
+		// `applyGlobalSettings` runs on every global settings write, including a
+		// project being added, so this is called far more often than it changes.
+		const { prompts } = setup({ presets: [preset()] });
+		const listener = vi.fn();
+		prompts.subscribe(listener);
+
+		prompts.setPresets([preset()]);
+
+		expect(listener).not.toHaveBeenCalled();
+	});
+
 	it("notifies subscribers when the selection changes", () => {
 		const { prompts } = setup({ presets: [preset(), preset({ id: "review" })] });
 		const listener = vi.fn();
