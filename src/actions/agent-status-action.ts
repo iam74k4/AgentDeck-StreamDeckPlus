@@ -6,85 +6,45 @@
  *   02:18
  */
 
-import streamDeck, { action, SingletonAction } from "@elgato/streamdeck";
-import type {
-	DidReceiveSettingsEvent,
-	KeyAction,
-	KeyDownEvent,
-	WillAppearEvent,
-	WillDisappearEvent,
-} from "@elgato/streamdeck";
+import streamDeck, { action } from "@elgato/streamdeck";
+import type { KeyAction, KeyDownEvent } from "@elgato/streamdeck";
 import { renderAgentStatusKey } from "../presentation/renderers/key-renderer.js";
 import { buildAgentStatusViewModel } from "../presentation/view-models/agent-status.js";
 import type { UiConcern } from "../presentation/ui-coordinator.js";
-import type { AgentDeckRuntime } from "../runtime.js";
-import { ActionSubscriptions } from "./action-subscriptions.js";
-import { bindRenderer } from "./renderer-binding.js";
+import { RenderedKeyAction } from "./rendered-key-action.js";
 import type { AgentStatusActionSettings } from "./settings.js";
 
 /** `tick` keeps the elapsed-time readout moving while a turn runs. */
-const CONCERNS: readonly UiConcern[] = ["session", "provider", "usage", "tick"];
 
 @action({ UUID: "com.agentdeck.streamdeck-plus.agent-status" })
-export class AgentStatusAction extends SingletonAction<AgentStatusActionSettings> {
-	readonly #runtime: AgentDeckRuntime;
-	readonly #subscriptions = new ActionSubscriptions();
-
-	public constructor(runtime: AgentDeckRuntime) {
-		super();
-		this.#runtime = runtime;
-	}
-
-	public override onWillAppear(ev: WillAppearEvent<AgentStatusActionSettings>): void {
-		if (ev.action.isKey()) {
-			this.#bind(ev.action, ev.payload.settings);
-		}
-	}
-
-	public override onWillDisappear(ev: WillDisappearEvent<AgentStatusActionSettings>): void {
-		this.#subscriptions.release(ev.action.id);
-	}
-
-	public override onDidReceiveSettings(ev: DidReceiveSettingsEvent<AgentStatusActionSettings>): void {
-		if (ev.action.isKey()) {
-			this.#bind(ev.action, ev.payload.settings);
-		}
+export class AgentStatusAction extends RenderedKeyAction<AgentStatusActionSettings> {
+	protected override get concerns(): readonly UiConcern[] {
+		return ["session", "provider", "usage", "tick"];
 	}
 
 	/** A press re-reads the session list; it never starts or stops anything. */
 	public override async onKeyDown(ev: KeyDownEvent<AgentStatusActionSettings>): Promise<void> {
 		try {
-			await this.#runtime.sessions.refresh();
+			await this.runtime.sessions.refresh();
 			await ev.action.showOk();
 		} catch (error) {
-			this.#runtime.logger.warn("failed to refresh sessions", error);
+			this.runtime.logger.warn("failed to refresh sessions", error);
 			await ev.action.showAlert();
 		}
 	}
 
-	#bind(target: KeyAction<AgentStatusActionSettings>, settings: AgentStatusActionSettings): void {
-		bindRenderer({
-			subscriptions: this.#subscriptions,
-			ui: this.#runtime.ui,
-			target,
-			settings,
-			concerns: CONCERNS,
-			render: (key, current) => this.#render(key, current),
-		});
-	}
-
-	async #render(
+	protected override async render(
 		target: KeyAction<AgentStatusActionSettings>,
 		settings: AgentStatusActionSettings,
 	): Promise<void> {
-		const providerId = settings.providerId ?? this.#runtime.defaultProviderId;
-		const provider = this.#runtime.registry.get(providerId);
-		const snapshot = this.#runtime.ui.getUsageSnapshot(providerId);
+		const providerId = settings.providerId ?? this.runtime.defaultProviderId;
+		const provider = this.runtime.registry.get(providerId);
+		const snapshot = this.runtime.ui.getUsageSnapshot(providerId);
 
 		const session =
 			settings.sessionMode === "fixed" && settings.sessionId !== undefined
-				? this.#runtime.sessions.list(providerId).find((candidate) => candidate.id === settings.sessionId)
-				: this.#runtime.sessions.getActiveSession(providerId);
+				? this.runtime.sessions.list(providerId).find((candidate) => candidate.id === settings.sessionId)
+				: this.runtime.sessions.getActiveSession(providerId);
 
 		const viewModel = buildAgentStatusViewModel({
 			providerLabel: provider?.displayName ?? providerId,

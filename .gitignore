@@ -10,5 +10,8 @@ com.agentdeck.streamdeck-plus.sdPlugin/logs/
 src/generated/codex/*
 !src/generated/codex/README.md
 
+# Packaged installer — produced by `npm run pack`.
+dist/
+
 coverage/
 .vitest/

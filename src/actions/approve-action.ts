@@ -14,25 +14,14 @@
  * no setting, gesture or repeat that turns it into a standing approval.
  */
 
-import { action, SingletonAction } from "@elgato/streamdeck";
-import type {
-	DidReceiveSettingsEvent,
-	KeyAction,
-	KeyDownEvent,
-	KeyUpEvent,
-	WillAppearEvent,
-	WillDisappearEvent,
-} from "@elgato/streamdeck";
+import { action } from "@elgato/streamdeck";
+import type { KeyAction, KeyDownEvent, KeyUpEvent } from "@elgato/streamdeck";
 import { requiresHoldToApprove } from "../domain/approval.js";
 import { renderApprovalKey } from "../presentation/renderers/key-renderer.js";
 import type { UiConcern } from "../presentation/ui-coordinator.js";
 import { buildApproveKeyViewModel } from "../presentation/view-models/approval.js";
-import type { AgentDeckRuntime } from "../runtime.js";
-import { ActionSubscriptions } from "./action-subscriptions.js";
-import { bindRenderer } from "./renderer-binding.js";
+import { RenderedKeyAction } from "./rendered-key-action.js";
 import type { ApprovalActionSettings } from "./settings.js";
-
-const CONCERNS: readonly UiConcern[] = ["approval"];
 
 /** Long enough to be deliberate, short enough not to feel broken. */
 export const DEFAULT_HOLD_MS = 1_200;
@@ -64,31 +53,16 @@ interface Hold {
 }
 
 @action({ UUID: "com.agentdeck.streamdeck-plus.approve" })
-export class ApproveAction extends SingletonAction<ApprovalActionSettings> {
-	readonly #runtime: AgentDeckRuntime;
-	readonly #subscriptions = new ActionSubscriptions();
+export class ApproveAction extends RenderedKeyAction<ApprovalActionSettings> {
+	protected override get concerns(): readonly UiConcern[] {
+		return ["approval"];
+	}
+
 	readonly #holds = new Map<string, Hold>();
 
-	public constructor(runtime: AgentDeckRuntime) {
-		super();
-		this.#runtime = runtime;
-	}
-
-	public override onWillAppear(ev: WillAppearEvent<ApprovalActionSettings>): void {
-		if (ev.action.isKey()) {
-			this.#bind(ev.action, ev.payload.settings);
-		}
-	}
-
-	public override onWillDisappear(ev: WillDisappearEvent<ApprovalActionSettings>): void {
-		this.#cancelHold(ev.action.id);
-		this.#subscriptions.release(ev.action.id);
-	}
-
-	public override onDidReceiveSettings(ev: DidReceiveSettingsEvent<ApprovalActionSettings>): void {
-		if (ev.action.isKey()) {
-			this.#bind(ev.action, ev.payload.settings);
-		}
+	/** A key that goes away mid-hold has not approved anything. */
+	protected override onReleased(actionId: string): void {
+		this.#cancelHold(actionId);
 	}
 
 	public override async onKeyDown(ev: KeyDownEvent<ApprovalActionSettings>): Promise<void> {
@@ -111,7 +85,7 @@ export class ApproveAction extends SingletonAction<ApprovalActionSettings> {
 	/** Releasing early cancels: a partial hold approves nothing. */
 	public override onKeyUp(ev: KeyUpEvent<ApprovalActionSettings>): void {
 		if (this.#cancelHold(ev.action.id) && ev.action.isKey()) {
-			void this.#render(ev.action, ev.payload.settings);
+			void this.render(ev.action, ev.payload.settings);
 		}
 	}
 
@@ -128,7 +102,7 @@ export class ApproveAction extends SingletonAction<ApprovalActionSettings> {
 			// disconnected — the hold has nothing left to approve.
 			if (this.#current(settings)?.request.id !== approvalId) {
 				this.#cancelHold(target.id);
-				void this.#render(target, settings);
+				void this.render(target, settings);
 				return;
 			}
 			const elapsed = Date.now() - startedAt;
@@ -137,12 +111,12 @@ export class ApproveAction extends SingletonAction<ApprovalActionSettings> {
 				void this.#approve(target, settings, approvalId);
 				return;
 			}
-			void this.#render(target, settings, elapsed / durationMs);
+			void this.render(target, settings, elapsed / durationMs);
 		}, HOLD_FRAME_MS);
 		timer.unref?.();
 
 		this.#holds.set(target.id, { timer, startedAt, durationMs, approvalId });
-		void this.#render(target, settings, 0);
+		void this.render(target, settings, 0);
 	}
 
 	#cancelHold(actionId: string): boolean {
@@ -162,31 +136,20 @@ export class ApproveAction extends SingletonAction<ApprovalActionSettings> {
 	): Promise<void> {
 		try {
 			// By id, not "whatever is current": the key answers the request it drew.
-			await this.#runtime.approvals.resolve(approvalId, "approve-once");
+			await this.runtime.approvals.resolve(approvalId, "approve-once");
 			await target.showOk();
 		} catch (error) {
-			this.#runtime.logger.warn("approve failed", error);
+			this.runtime.logger.warn("approve failed", error);
 			await target.showAlert();
 		}
-		await this.#render(target, settings);
+		await this.render(target, settings);
 	}
 
 	#current(settings: ApprovalActionSettings) {
-		return this.#runtime.ui.getCurrentApproval(providerFilter(settings));
+		return this.runtime.ui.getCurrentApproval(providerFilter(settings));
 	}
 
-	#bind(target: KeyAction<ApprovalActionSettings>, settings: ApprovalActionSettings): void {
-		bindRenderer({
-			subscriptions: this.#subscriptions,
-			ui: this.#runtime.ui,
-			target,
-			settings,
-			concerns: CONCERNS,
-			render: (key, current) => this.#render(key, current),
-		});
-	}
-
-	async #render(
+	protected override async render(
 		target: KeyAction<ApprovalActionSettings>,
 		settings: ApprovalActionSettings,
 		holdProgress = 0,

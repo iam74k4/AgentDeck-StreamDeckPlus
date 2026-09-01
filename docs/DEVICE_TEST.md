@@ -19,7 +19,15 @@ CI環境には実機もCodex CLIも無いため、この章だけは人手で確
 ```powershell
 npm ci
 npm run build
+npm run doctor
 ```
+
+`npm run doctor` が前提条件を順に確認する。**FAIL が残っている状態では
+以降のチェックリストを始めない**こと。WARN はその項目が無効になるだけで、
+他の機能には影響しない。
+
+チェックアウト無しで入れる場合は `npm run pack` で
+`dist/com.agentdeck.streamdeck-plus.streamDeckPlugin` を作り、ダブルクリックする。
 
 `com.agentdeck.streamdeck-plus.sdPlugin` を Stream Deck のプラグインフォルダへ
 リンクまたはコピーする。

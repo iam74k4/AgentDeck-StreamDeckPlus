@@ -772,3 +772,59 @@ pin 中のSessionが消えた場合は pin もハイライトも落とす。
 ソート順 `[a,b,c]` の巡回シフトなので、位置の集合が一致してしまう。
 `[b,a,c]` に変え、「1ステップで表示も1つ進む」ことを検査する形に直した。
 再現テストは、直す前に落ちることを確認して初めてテストになる。
+
+---
+
+## 12. 動作確認の準備
+
+### Action層の共通化
+
+11個のKey Actionが同じ30行（appear/settingsで再bind、disappearでrelease、
+再描画クロージャの作り直し）を繰り返していた。この重複こそが
+「settingsを掴んだまま古い値を描き続ける」不具合の温床だったので、
+`RenderedKeyAction` へ寄せた。Actionが書くのは
+「どのconcernで再描画するか」と「どう描くか」だけになる。
+
+**456行減。テストは457件そのまま通る。**
+
+この過程で、`GitAction` / `DiffAction` のリポジトリ監視を移し忘れたのを
+既存テストが捕まえた。共通化を安全に進められるだけのテストが揃っていた
+ということでもある。
+
+### `npm run doctor`
+
+Pluginは設計上、失敗しても静かに縮退する（Codex CLIが無ければキーに `CLI?`
+と出るだけ）。デッキの上ではそれが正しいが、原因を追うときには役に立たない。
+doctorは**失敗する順番どおりに**前提条件を確認し、何が欠けていて何が
+できなくなるかを言う。
+
+| 確認                                                   | 落ちたときの意味                                       |
+| ------------------------------------------------------ | ------------------------------------------------------ |
+| Node 20.5.1+                                           | Pluginが動かない                                       |
+| ビルド済みバンドル2種                                  | `npm run build` 未実行                                 |
+| Stream Deck の Plugins フォルダとリンク                | Pluginが認識されていない                               |
+| Codex CLI + **app-server ハンドシェイク** + サインイン | `--version` が通ってもapp-serverが古い場合を分離できる |
+| git                                                    | Git / Diff キーが `NO GIT`                             |
+| PowerShell / System.Speech / マイク                    | Clipboard・Screenshot・Push-to-Talk                    |
+| Claude bridge の書き込みと鮮度                         | Claude Usage が `SETUP` / `STALE`                      |
+
+Codexプローブは実際に `initialize` → `initialized` → `account/read` を
+往復する。3分岐（正常 / 未サインイン / 無応答）とも、fake app-serverを
+`codex` としてPATHに置いて実行確認済み。
+
+### `npm run pack`
+
+`dist/com.agentdeck.streamdeck-plus.streamDeckPlugin`（218KB）を生成する。
+ダブルクリックで入るので、チェックアウト無しの環境でも試せる。
+
+#### ここで見つかった不具合
+
+**パッケージに古い `bin/statusline.js` が入っていた。** `.js` → `.mjs` へ
+リネームしたとき、古いファイルが出力フォルダに残り、`pack` はフォルダの中身を
+そのまま詰めるため installer に同梱されていた。**まさにロードできない
+ことが分かっているファイル**が、古いパスを設定したままの利用者向けに
+配られる状態だった。ビルド開始時に `bin/` を消すようにした。
+
+生成後のパッケージは、展開して**package.jsonが上位に無い場所**から
+`statusline.mjs` を実行して動作確認している（以前same-repoで確認して
+取り違えた検証を、今度は成果物そのもので行った）。

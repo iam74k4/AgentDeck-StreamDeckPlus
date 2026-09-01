@@ -9,48 +9,19 @@
  * the active project.
  */
 
-import { action, SingletonAction } from "@elgato/streamdeck";
-import type {
-	DidReceiveSettingsEvent,
-	KeyAction,
-	KeyDownEvent,
-	WillAppearEvent,
-	WillDisappearEvent,
-} from "@elgato/streamdeck";
+import { action } from "@elgato/streamdeck";
+import type { KeyAction, KeyDownEvent } from "@elgato/streamdeck";
 import { renderDiffKey } from "../presentation/renderers/key-renderer.js";
+import type { Unsubscribe } from "../domain/provider-events.js";
 import type { UiConcern } from "../presentation/ui-coordinator.js";
 import { buildDiffViewModel } from "../presentation/view-models/diff.js";
-import type { AgentDeckRuntime } from "../runtime.js";
-import { ActionSubscriptions } from "./action-subscriptions.js";
-import { bindRenderer } from "./renderer-binding.js";
+import { RenderedKeyAction } from "./rendered-key-action.js";
 import type { GitActionSettings } from "./settings.js";
 
-const CONCERNS: readonly UiConcern[] = ["git", "project"];
-
 @action({ UUID: "com.agentdeck.streamdeck-plus.diff" })
-export class DiffAction extends SingletonAction<GitActionSettings> {
-	readonly #runtime: AgentDeckRuntime;
-	readonly #subscriptions = new ActionSubscriptions();
-
-	public constructor(runtime: AgentDeckRuntime) {
-		super();
-		this.#runtime = runtime;
-	}
-
-	public override onWillAppear(ev: WillAppearEvent<GitActionSettings>): void {
-		if (ev.action.isKey()) {
-			this.#bind(ev.action, ev.payload.settings);
-		}
-	}
-
-	public override onWillDisappear(ev: WillDisappearEvent<GitActionSettings>): void {
-		this.#subscriptions.release(ev.action.id);
-	}
-
-	public override onDidReceiveSettings(ev: DidReceiveSettingsEvent<GitActionSettings>): void {
-		if (ev.action.isKey()) {
-			this.#bind(ev.action, ev.payload.settings);
-		}
+export class DiffAction extends RenderedKeyAction<GitActionSettings> {
+	protected override get concerns(): readonly UiConcern[] {
+		return ["git", "project"];
 	}
 
 	public override async onKeyDown(ev: KeyDownEvent<GitActionSettings>): Promise<void> {
@@ -59,8 +30,14 @@ export class DiffAction extends SingletonAction<GitActionSettings> {
 			await ev.action.showAlert();
 			return;
 		}
-		await this.#runtime.git.refresh(path);
+		await this.runtime.git.refresh(path);
 		await ev.action.showOk();
+	}
+
+	/** Follows whichever repository the key is pointed at, and re-follows on change. */
+	protected override watch(settings: GitActionSettings): readonly Unsubscribe[] {
+		const path = this.#repositoryPath(settings);
+		return path === undefined ? [] : [this.runtime.git.watch(path)];
 	}
 
 	#repositoryPath(settings: GitActionSettings): string | undefined {
@@ -68,28 +45,16 @@ export class DiffAction extends SingletonAction<GitActionSettings> {
 		if (typeof configured === "string" && configured.length > 0) {
 			return configured;
 		}
-		return this.#runtime.projects.getActive()?.path;
+		return this.runtime.projects.getActive()?.path;
 	}
 
-	#bind(target: KeyAction<GitActionSettings>, settings: GitActionSettings): void {
-		bindRenderer({
-			subscriptions: this.#subscriptions,
-			ui: this.#runtime.ui,
-			target,
-			settings,
-			concerns: CONCERNS,
-			render: (key, current) => this.#render(key, current),
-			watch: (current) => {
-				const path = this.#repositoryPath(current);
-				return path === undefined ? [] : [this.#runtime.git.watch(path)];
-			},
-		});
-	}
-
-	async #render(target: KeyAction<GitActionSettings>, settings: GitActionSettings): Promise<void> {
+	protected override async render(
+		target: KeyAction<GitActionSettings>,
+		settings: GitActionSettings,
+	): Promise<void> {
 		const path = this.#repositoryPath(settings);
 		await target.setImage(
-			renderDiffKey(buildDiffViewModel(path === undefined ? undefined : this.#runtime.ui.getGitEntry(path))),
+			renderDiffKey(buildDiffViewModel(path === undefined ? undefined : this.runtime.ui.getGitEntry(path))),
 		);
 	}
 }

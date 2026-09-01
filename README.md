@@ -63,11 +63,34 @@ npx @elgato/cli restart com.agentdeck.streamdeck-plus
 
 `npm run watch` rebuilds and restarts the plugin as you edit.
 
+To install it somewhere without a checkout, `npm run pack` writes
+`dist/com.agentdeck.streamdeck-plus.streamDeckPlugin`, which the Stream Deck app
+installs on a double-click.
+
+### Before you test on the device
+
+```bash
+npm run doctor
+```
+
+It checks, in the order things fail: Node, the built bundles, whether the Stream
+Deck app can see the plugin, whether the Codex CLI is present **and completes an
+`app-server` handshake** and is signed in, git, PowerShell and `System.Speech`
+and a usable microphone, and whether the Claude bridge has written anything
+lately.
+
+Each line says what it disables rather than only that it failed, because the
+plugin is deliberately quiet about this: a missing Codex CLI shows `CLI?` on one
+key and nothing else. A failure is a blocker; a warning names a feature you may
+not want. Then work through [`docs/DEVICE_TEST.md`](./docs/DEVICE_TEST.md).
+
 ## Scripts
 
 | Script                         | Purpose                                                         |
 | ------------------------------ | --------------------------------------------------------------- |
 | `npm run verify`               | format check → lint → typecheck → tests → build                 |
+| `npm run doctor`               | preflight: everything the plugin needs, and what is missing     |
+| `npm run pack`                 | build a `.streamDeckPlugin` installer into `dist/`              |
 | `npm run build`                | bundle `src/plugin.ts` into the `.sdPlugin` folder              |
 | `npm run watch`                | rebuild and restart the plugin on change                        |
 | `npm test`                     | unit and integration tests                                      |

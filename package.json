@@ -10,6 +10,8 @@
 	},
 	"scripts": {
 		"build": "rollup -c",
+		"doctor": "node scripts/doctor.mjs",
+		"pack": "npm run build && npx @elgato/cli pack com.agentdeck.streamdeck-plus.sdPlugin --force --output dist",
 		"watch": "rollup -c -w --watch.onEnd=\"streamdeck restart com.agentdeck.streamdeck-plus\"",
 		"typecheck": "tsc --noEmit",
 		"lint": "eslint .",
