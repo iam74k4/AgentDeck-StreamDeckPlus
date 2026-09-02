@@ -34,6 +34,7 @@ import { JsonRpcTransport } from "./json-rpc.js";
 import {
 	applyFullRateLimits,
 	applyRateLimitsUpdate,
+	applyThreadSettings,
 	createRateLimitState,
 	fileChangeCounts,
 	isAuthenticatedAccount,
@@ -54,6 +55,7 @@ import {
 	type WireFileChangeItem,
 	type WireItemNotification,
 	type WirePlanItem,
+	type WireThreadSettingsUpdated,
 	type WireThreadStartedNotification,
 	type WireThreadStatusChanged,
 	type WireTurnNotification,
@@ -694,6 +696,9 @@ export class CodexProvider implements AgentProvider {
 				case CodexNotification.ThreadStatusChanged:
 					this.#onThreadStatusChanged(params as WireThreadStatusChanged);
 					return;
+				case CodexNotification.ThreadSettingsUpdated:
+					this.#onThreadSettings(params as WireThreadSettingsUpdated | undefined);
+					return;
 				case CodexNotification.TurnStarted:
 					this.#onTurnStarted(params as WireTurnNotification);
 					return;
@@ -753,6 +758,33 @@ export class CodexProvider implements AgentProvider {
 			delete next.currentTurnId;
 		}
 		this.#upsertSession(next, { emit: true });
+	}
+
+	/**
+	 * Design §19 and §7.1 — the thread's own settings.
+	 *
+	 * `cwd` is why this is handled at all: it is the directory the agent is
+	 * working in, and the runtime adopts it as a project so nobody has to type an
+	 * absolute path into a Property Inspector. The model and effort come from the
+	 * same notification, which is what lets the Model dial start on what the
+	 * session is actually running.
+	 */
+	#onThreadSettings(params: WireThreadSettingsUpdated | undefined): void {
+		const threadId = params?.threadId;
+		if (typeof threadId !== "string") {
+			return;
+		}
+		const existing = this.#sessions.get(threadId) ?? {
+			id: threadId,
+			providerId: this.id,
+			state: "idle" as const,
+			updatedAt: new Date(),
+		};
+		const next = applyThreadSettings(existing, params?.threadSettings ?? undefined);
+		if (next === existing) {
+			return;
+		}
+		this.#upsertSession({ ...next, updatedAt: new Date() }, { emit: true });
 	}
 
 	#onTurnStarted(params: WireTurnNotification | undefined): void {

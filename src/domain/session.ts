@@ -38,6 +38,16 @@ export interface AgentSession {
 	modelId?: string;
 	reasoningLevel?: string;
 
+	/**
+	 * Where the agent is working.
+	 *
+	 * Not in design §7.2, which carries `projectId`. The two are different
+	 * questions: `projectId` is the project the user chose, and this is the
+	 * directory the provider reports. Keeping both is what lets the deck adopt a
+	 * project the user never had to type in, without overriding one they picked.
+	 */
+	cwd?: string;
+
 	label?: string;
 
 	plan?: PlanSummary;

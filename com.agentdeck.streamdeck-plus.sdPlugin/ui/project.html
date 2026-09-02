@@ -7,19 +7,31 @@
 	</head>
 	<body>
 		<h1>Project</h1>
-		<div class="row">
-			<label for="add-path">Add path</label>
-			<input id="add-path" type="text" placeholder="C:\src\my-project" data-setting="addPath" />
-		</div>
 		<p class="hint">
-			Absolute path to register and activate on the first press. Leave empty and the key cycles through the
-			projects you have already registered.
+			<strong>Usually nothing to set here.</strong> Run <code>codex</code> in a repository and AgentDeck
+			registers that directory by itself — Git, Diff and the launchers all follow it.
 		</p>
 		<div class="row">
 			<label for="project-id">Pin to</label>
-			<input id="project-id" type="text" placeholder="(active project)" data-setting="projectId" />
+			<select id="project-id" data-setting="projectId" data-options-from="projects">
+				<option value="">Cycle through all projects</option>
+			</select>
 		</div>
-		<p class="hint">Project id to activate on press instead of cycling.</p>
+		<p class="hint">
+			Pressing the key normally cycles through registered projects. Pin one to make this key jump straight to
+			it instead.
+		</p>
+		<fieldset>
+			<legend>Add one by hand</legend>
+			<div class="row">
+				<label for="add-path">Path</label>
+				<input id="add-path" type="text" placeholder="C:\src\my-project" data-setting="addPath" />
+			</div>
+			<p class="hint">
+				Only needed for a repository no agent has opened yet. Registered and activated on the first press;
+				clear the field afterwards or every press re-registers it.
+			</p>
+		</fieldset>
 		<fieldset>
 			<legend>Plugin settings</legend>
 			<div class="row">

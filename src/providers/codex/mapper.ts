@@ -17,6 +17,7 @@ import type {
 	WireThread,
 	WireFileChangeItem,
 	WirePlanItem,
+	WireThreadSettings,
 	WireThreadStatus,
 	WireTurnStatus,
 	WireUserInput,
@@ -458,4 +459,30 @@ export function summariseFileCounts(counts: FileChangeCounts): DiffSummary {
 		removed += entry.removed;
 	}
 	return { added, removed, fileCount: counts.size };
+}
+
+/**
+ * Folds a thread's settings into the session.
+ *
+ * Only fields that are actually present change anything: Codex sends the whole
+ * settings object, but a missing `cwd` must not erase one the deck already knows.
+ */
+export function applyThreadSettings(
+	session: AgentSession,
+	settings: WireThreadSettings | undefined,
+): AgentSession {
+	if (settings === null || settings === undefined) {
+		return session;
+	}
+	const next: AgentSession = { ...session };
+	if (typeof settings.cwd === "string" && settings.cwd.length > 0) {
+		next.cwd = settings.cwd;
+	}
+	if (typeof settings.model === "string" && settings.model.length > 0) {
+		next.modelId = settings.model;
+	}
+	if (typeof settings.effort === "string" && settings.effort.length > 0) {
+		next.reasoningLevel = settings.effort;
+	}
+	return next;
 }

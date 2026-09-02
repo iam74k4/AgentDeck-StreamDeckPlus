@@ -38,6 +38,7 @@ export const CodexNotification = {
 	AccountRateLimitsUpdated: "account/rateLimits/updated",
 	ThreadStarted: "thread/started",
 	ThreadStatusChanged: "thread/status/changed",
+	ThreadSettingsUpdated: "thread/settings/updated",
 	TurnStarted: "turn/started",
 	TurnCompleted: "turn/completed",
 	ItemStarted: "item/started",
@@ -238,4 +239,22 @@ export interface WireItemNotification {
 	threadId?: string;
 	turnId?: string;
 	item?: { type?: string } & Partial<WirePlanItem> & Partial<WireFileChangeItem>;
+}
+
+/**
+ * `ThreadSettings` — the three fields the deck can use.
+ *
+ * `cwd` is the interesting one: it is where the agent is actually working, which
+ * is the project the deck should be pointed at. Learning it from Codex is what
+ * saves the user typing an absolute path into a Property Inspector.
+ */
+export interface WireThreadSettings {
+	cwd?: string | null;
+	model?: string | null;
+	effort?: string | null;
+}
+
+export interface WireThreadSettingsUpdated {
+	threadId?: string;
+	threadSettings?: WireThreadSettings | null;
 }

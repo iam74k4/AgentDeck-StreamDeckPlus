@@ -171,6 +171,35 @@ export function createRuntime(options: RuntimeOptions): AgentDeckRuntime {
 		},
 	});
 
+	/**
+	 * Adopts the directory the agent says it is working in.
+	 *
+	 * The project path is the one setting the deck genuinely needs, and typing an
+	 * absolute path into a Property Inspector is the worst way to supply it. Codex
+	 * already knows it — `thread/settings/updated` carries the thread's `cwd` — so
+	 * running `codex` in a repository is enough to point the deck at it.
+	 *
+	 * `add` is idempotent by path and only activates when nothing is active, so
+	 * this registers without ever overriding a project the user chose. Switching
+	 * stays a deliberate act on the Project key.
+	 */
+	const adopted = new Set<string>();
+	registry.subscribe((event) => {
+		if (event.type !== "session-updated") {
+			return;
+		}
+		const cwd = event.session.cwd;
+		if (cwd === undefined || adopted.has(cwd)) {
+			return;
+		}
+		adopted.add(cwd);
+		void projects.add({ path: cwd }).catch((error: unknown) => {
+			// A path the agent reports may not be one the deck can use — a UNC share
+			// it cannot see, say. That is not worth an error on the deck.
+			logger.debug("could not adopt the agent's working directory", error);
+		});
+	});
+
 	// Design §16.3: an agent event is a better git refresh trigger than a timer.
 	// Only the working → not-working transition counts. Firing on every
 	// session-updated would spawn a git process per event, and a provider that

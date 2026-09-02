@@ -110,6 +110,16 @@ Turn開始はv0.3の作業なので、この節は該当機能が入るまで実
 - [ ] 押下で適用され、表示から `press` が消える
 - [ ] Provider を Claude にすると `not supported` になり、押下しても失敗しない
 
+### 3.5.1 Project 自動採用（設計書 §7.1）
+
+- [ ] Projectを1つも登録していない状態で、リポジトリ内から `codex` を起動すると
+      そのディレクトリが自動でProjectとして登録され、有効になる
+- [ ] Git / Diff キーがそのリポジトリを指す
+- [ ] すでに別のProjectを選んでいる場合、自動採用で**切り替わらない**
+      （一覧には加わる）
+- [ ] Project キーの Property Inspector の「Pin to」に登録済みProjectが並ぶ
+- [ ] Projectを削除すると、Pin to の選択が空に戻る
+
 ### 3.6 Prompt / Clipboard（設計書 §14, §15.2）
 
 - [ ] Prompt キーに Preset 名と入力元（`clipboard → agent` 等）が表示される

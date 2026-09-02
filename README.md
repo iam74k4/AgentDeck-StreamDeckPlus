@@ -14,6 +14,7 @@ do I stop it right now.
 
 <sub>An agent waiting on a high-risk approval, with the microphone open: the Approve key shows a hold ring mid-hold, Deny is one press, and Push-to-Talk is recording. Below the strip are the segments an encoder can be set to instead — Session shows a pinned session at <code>Plan 2/4</code>, and the AI Overview keeps providers side by side, never summed. Generated from the shipped renderers by <code>npm run preview</code>.</sub>
 
+- **Setup, step by step (日本語):** [`docs/SETUP.md`](./docs/SETUP.md)
 - **Design document (source of truth):** [`AGENTDECK_DESIGN.md`](./AGENTDECK_DESIGN.md)
 - **Implementation brief:** [`docs/AGENTDECK_CLAUDE_INSTRUCTIONS.md`](./docs/AGENTDECK_CLAUDE_INSTRUCTIONS.md)
 - **Current status:** [`docs/SPIKE_REPORT.md`](./docs/SPIKE_REPORT.md)
@@ -77,7 +78,7 @@ It checks, in the order things fail: Node, the built bundles, whether the Stream
 Deck app can see the plugin, whether the Codex CLI is present **and completes an
 `app-server` handshake** and is signed in, git, PowerShell and `System.Speech`
 and a usable microphone, and whether the Claude bridge has written anything
-lately.
+lately. Where a step needs configuration it prints exactly what to paste.
 
 Each line says what it disables rather than only that it failed, because the
 plugin is deliberately quiet about this: a missing Codex CLI shows `CLI?` on one
@@ -251,8 +252,13 @@ A Project binds a local directory to an AI working context. It is deliberately a
 separate thing from an agent session and from a provider — "which repository",
 "which session" and "which agent" are three different questions (design §3.4).
 
-Register one from the Project key's inspector, or press the key with an **Add
-path** configured. After that the key cycles through what you have registered,
+Usually you never register one: run `codex` in a repository and AgentDeck adopts
+that directory, because `thread/settings/updated` tells it where the agent is
+working. Adopting only ever adds to the list and activates when nothing else is
+active — a project you chose is never switched out from under you.
+
+Failing that, register one from the Project key's inspector, or press the key
+with an **Add path** configured. After that the key cycles through what you have registered,
 and switching moves everything that follows the project at once: the git key and
 segment re-point, and any launcher set to start "in project" follows too.
 
@@ -295,14 +301,24 @@ Claude Code pushes; AgentDeck cannot pull. Point Claude Code's status line at
 AgentDeck's bridge and it hands over the same JSON it uses to draw your own
 status line:
 
+```bash
+npm run doctor
+```
+
+prints the exact line to paste, with the absolute path for your machine:
+
 ```json
 {
 	"statusLine": {
 		"type": "command",
-		"command": "node \"%APPDATA%\\Elgato\\StreamDeck\\Plugins\\com.agentdeck.streamdeck-plus.sdPlugin\\bin\\statusline.mjs\""
+		"command": "node \"C:\\Users\\you\\AppData\\Roaming\\Elgato\\StreamDeck\\Plugins\\com.agentdeck.streamdeck-plus.sdPlugin\\bin\\statusline.mjs\""
 	}
 }
 ```
+
+An absolute path rather than `%APPDATA%`: that only expands if Claude Code runs
+the status line through `cmd.exe`, and a path that silently stays literal under
+any other shell is a poor thing to put in a setup step.
 
 Already have a status line? Keep it — the bridge chains:
 

@@ -801,3 +801,42 @@ describe("plan and diff on a live session (design §3.5, §16.2)", () => {
 		expect(provider.sessions.every((session) => session.plan === undefined)).toBe(true);
 	});
 });
+
+describe("adopting the agent's working directory", () => {
+	const settingsNotification = (threadId: string, threadSettings: Record<string, unknown>) => ({
+		delayMs: 10,
+		method: "thread/settings/updated",
+		params: { threadId, threadSettings },
+	});
+
+	it("learns the working directory, model and effort from the thread's settings", async () => {
+		const provider = createProvider({
+			FAKE_SCRIPT: JSON.stringify([
+				settingsNotification("thr_1", { cwd: "C:/work/Game", model: "gpt-5.1-codex", effort: "high" }),
+			]),
+		});
+		await provider.start();
+		await waitFor(() => provider.sessions[0]?.cwd !== undefined);
+
+		expect(provider.sessions[0]).toMatchObject({
+			cwd: "C:/work/Game",
+			modelId: "gpt-5.1-codex",
+			reasoningLevel: "high",
+		});
+	});
+
+	it("does not erase what it already knows when a field is absent", async () => {
+		const provider = createProvider({
+			FAKE_SCRIPT: JSON.stringify([
+				settingsNotification("thr_1", { cwd: "C:/work/Game", model: "gpt-5.1-codex" }),
+				// Codex sends the whole settings object; a later one without `cwd`
+				// must not blank the directory the deck is pointed at.
+				settingsNotification("thr_1", { model: "gpt-5.1" }),
+			]),
+		});
+		await provider.start();
+		await waitFor(() => provider.sessions[0]?.modelId === "gpt-5.1");
+
+		expect(provider.sessions[0]?.cwd).toBe("C:/work/Game");
+	});
+});

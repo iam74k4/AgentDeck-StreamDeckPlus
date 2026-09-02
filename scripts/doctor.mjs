@@ -334,6 +334,49 @@ function agentDeckDataDir() {
 	return home.length > 0 ? join(home, ".agentdeck") : join(tmpdir(), "agentdeck");
 }
 
+/**
+ * The exact command to paste, for this machine.
+ *
+ * Absolute, with no environment variable in it. `%APPDATA%` only expands if
+ * Claude Code happens to run the status line through cmd.exe, and a path that
+ * silently stays literal under any other shell is a bad thing to put in a
+ * setup instruction.
+ */
+function bridgeCommand() {
+	const installed = streamDeckPluginsDir();
+	const candidates = [
+		installed === undefined ? undefined : join(installed, `${PLUGIN_UUID}.sdPlugin`, "bin", "statusline.mjs"),
+		join(ROOT, `${PLUGIN_UUID}.sdPlugin`, "bin", "statusline.mjs"),
+	].filter((path) => path !== undefined && existsSync(path));
+
+	const target = candidates[0];
+	// Quoted for spaces in the path; JSON.stringify below handles the escaping,
+	// which is not something to attempt by hand.
+	return target === undefined ? undefined : `node "${target}"`;
+}
+
+function reportBridgeSetup() {
+	const command = bridgeCommand();
+	if (command === undefined) {
+		console.log("          Build first (npm run build), then re-run to get the exact command.");
+		return;
+	}
+	const settings = join(
+		IS_WINDOWS ? (process.env.USERPROFILE ?? homedir()) : homedir(),
+		".claude",
+		"settings.json",
+	);
+	const snippet = JSON.stringify({ statusLine: { type: "command", command } }, null, 2);
+
+	console.log(`\n          Add this to ${settings}:\n`);
+	for (const line of snippet.split("\n")) {
+		console.log(`            ${line}`);
+	}
+	console.log("\n          Already have a status line? Keep yours by appending");
+	console.log("          --then and your command to the one above.");
+	console.log("\n          Then open a Claude Code session and re-run npm run doctor.");
+}
+
 function checkClaudeBridge() {
 	section("Claude bridge");
 	const dir = agentDeckDataDir();
@@ -346,9 +389,9 @@ function checkClaudeBridge() {
 			WARN,
 			"Bridge readings",
 			`none in ${dir}`,
-			"Claude usage stays at SETUP until Claude Code's status line points here.\n" +
-				"See “Connecting Claude” in the README. Codex is unaffected.",
+			"Claude usage stays at SETUP until Claude Code's status line points here.\n" + "Codex is unaffected.",
 		);
+		reportBridgeSetup();
 		return;
 	}
 

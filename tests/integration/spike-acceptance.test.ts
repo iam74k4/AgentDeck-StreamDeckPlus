@@ -117,6 +117,49 @@ afterAll(() => {
 	rmSync(bridgeDir, { recursive: true, force: true });
 });
 
+describe("adopting a project without typing one in (design §7.1)", () => {
+	it("registers and activates the directory the agent reports", async () => {
+		const { runtime: rt, gitEncoder } = makeRuntime({
+			FAKE_SCRIPT: JSON.stringify([
+				{
+					delayMs: 20,
+					method: "thread/settings/updated",
+					params: { threadId: "thr_1", threadSettings: { cwd: repo, model: "gpt-5.1-codex" } },
+				},
+			]),
+		});
+		await rt.start();
+
+		// Nothing was registered by hand; the deck learns the repository from the
+		// agent and everything that follows a project follows it.
+		await waitFor(() => rt.projects.getActive()?.path === repo, {
+			message: "the agent's working directory was never adopted",
+		});
+		await waitFor(() => gitEncoder.last?.value.value === "main");
+	});
+
+	it("never overrides a project the user chose", async () => {
+		const { runtime: rt } = makeRuntime({
+			FAKE_SCRIPT: JSON.stringify([
+				{
+					delayMs: 40,
+					method: "thread/settings/updated",
+					params: { threadId: "thr_1", threadSettings: { cwd: bridgeDir } },
+				},
+			]),
+		});
+		await rt.start();
+		const chosen = await rt.projects.add({ path: repo, name: "chosen" });
+		await rt.projects.activate(chosen.id);
+
+		await waitFor(() => rt.projects.list().some((project) => project.path === bridgeDir));
+
+		// Registered, so it is one press away — but the active project is still
+		// the one the user picked.
+		expect(rt.projects.getActive()?.id).toBe(chosen.id);
+	});
+});
+
 describe("technical spike acceptance", () => {
 	it("shows Codex usage, agent status, model and project across the touch strip", async () => {
 		const { runtime: rt, encoders, gitEncoder } = makeRuntime();

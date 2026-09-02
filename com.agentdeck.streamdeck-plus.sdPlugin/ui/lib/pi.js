@@ -128,8 +128,57 @@
 	 */
 	var WRITE_DEBOUNCE_MS = 400;
 
+	/**
+	 * Rebuilds a `<select>` from a list held in the global settings.
+	 *
+	 * `data-options-from="projects"` fills the element from
+	 * `globalSettings.projects`, keeping whatever placeholder option is already in
+	 * the markup. Used so a project is chosen from what is registered rather than
+	 * typed as an absolute path, which is the worst thing to ask of anyone in a
+	 * panel this size.
+	 */
+	function refreshOptions(element) {
+		var source = globalSettings[element.dataset.optionsFrom];
+		var previous = element.value;
+
+		// Anything the markup declared stays; only generated options are replaced.
+		Array.prototype.forEach.call(element.querySelectorAll("option[data-generated]"), function (option) {
+			option.remove();
+		});
+
+		if (Array.isArray(source)) {
+			source.forEach(function (entry) {
+				if (!entry || typeof entry.id !== "string") {
+					return;
+				}
+				var option = document.createElement("option");
+				option.value = entry.id;
+				option.textContent = typeof entry.name === "string" && entry.name.length > 0 ? entry.name : entry.id;
+				option.dataset.generated = "true";
+				element.appendChild(option);
+			});
+		}
+		// Restore the selection, unless what was selected is gone — a project the
+		// user removed must not stay on screen as a choice. A browser would clear
+		// an unmatched value on assignment anyway; checking the options says so
+		// out loud rather than leaving the panel's behaviour resting on a rule the
+		// next reader has to already know.
+		var stillThere = Array.prototype.some.call(element.options || element.children, function (option) {
+			return option.value === previous;
+		});
+		element.value = stillThere ? previous : "";
+	}
+
+	function refreshAllOptions() {
+		Array.prototype.forEach.call(document.querySelectorAll("[data-options-from]"), refreshOptions);
+	}
+
 	function bind() {
 		Array.prototype.forEach.call(document.querySelectorAll("[data-setting]"), function (element) {
+			// Options first: `applyTo` cannot select a value that is not there yet.
+			if (element.dataset.optionsFrom) {
+				refreshOptions(element);
+			}
 			applyTo(element);
 
 			var immediate = element.tagName === "SELECT" || element.type === "checkbox";
@@ -206,6 +255,7 @@
 			if (data.event === "didReceiveGlobalSettings") {
 				globalSettings = (data.payload && data.payload.settings) || {};
 				if (connected) {
+					refreshAllOptions();
 					Array.prototype.forEach.call(document.querySelectorAll('[data-scope="global"]'), applyTo);
 				} else {
 					ready();
