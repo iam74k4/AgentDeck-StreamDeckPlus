@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ProviderEvent } from "@/domain/provider-events.js";
 import { createLogger, nullSink } from "@/infrastructure/logger.js";
+import { spawnManagedProcess } from "@/infrastructure/process-manager.js";
 import { CodexProvider, MIN_HEALTH_CHECK_INTERVAL_MS } from "@/providers/codex/codex-provider.js";
 import { waitFor } from "../helpers/wait.js";
 
@@ -838,5 +839,33 @@ describe("adopting the agent's working directory", () => {
 		await waitFor(() => provider.sessions[0]?.modelId === "gpt-5.1");
 
 		expect(provider.sessions[0]?.cwd).toBe("C:/work/Game");
+	});
+});
+
+describe("finding the Codex CLI on Windows", () => {
+	it("spawns the path it resolved, not the name it was given", async () => {
+		// npm installs the CLI as `codex.cmd`. `resolveExecutable` knows about
+		// PATHEXT and finds it, but Windows `CreateProcess` does not apply PATHEXT
+		// — so spawning the bare name fails with ENOENT on a machine where
+		// `codex --version` works fine in a terminal, and the deck shows CLI?.
+		const spawned: string[] = [];
+		const provider = new CodexProvider({
+			executable: "codex",
+			args: [FAKE_SERVER],
+			logger,
+			autoRestart: false,
+			resolve: () => "C:\\Users\\dev\\AppData\\Roaming\\npm\\codex.cmd",
+			spawn: (options) => {
+				spawned.push(options.command);
+				// The real spawn is exercised everywhere else in this file; here only
+				// the command matters, so start the fake server directly.
+				return spawnManagedProcess({ ...options, command: process.execPath });
+			},
+		});
+		started.push(provider);
+
+		await provider.start();
+
+		expect(spawned).toEqual(["C:\\Users\\dev\\AppData\\Roaming\\npm\\codex.cmd"]);
 	});
 });

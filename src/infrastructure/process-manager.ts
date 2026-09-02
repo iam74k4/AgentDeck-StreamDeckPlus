@@ -7,7 +7,7 @@
  * Shutdown order (design §9.5): close stdin → terminate → force kill on timeout.
  */
 
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
 import { AgentDeckError } from "../domain/errors.js";
 import type { Logger } from "./logger.js";
@@ -30,6 +30,8 @@ export interface SpawnOptions {
 	logger?: Logger;
 	/** Milliseconds to wait after closing stdin before escalating. Default 3000. */
 	shutdownGraceMs?: number;
+	/** Overridable for tests; defaults to the host platform. */
+	platform?: NodeJS.Platform;
 }
 
 export interface ManagedProcess {
@@ -48,6 +50,7 @@ class NodeManagedProcess implements ManagedProcess {
 	readonly #child: ChildProcessWithoutNullStreams;
 	readonly #graceMs: number;
 	readonly #logger: Logger | undefined;
+	readonly #platform: NodeJS.Platform;
 	readonly #exited: Promise<ProcessExit>;
 	#running = true;
 	#shutdownPromise: Promise<ProcessExit> | undefined;
@@ -57,10 +60,12 @@ class NodeManagedProcess implements ManagedProcess {
 		command: string,
 		graceMs: number,
 		logger?: Logger,
+		platform: NodeJS.Platform = process.platform,
 	) {
 		this.#child = child;
 		this.#graceMs = graceMs;
 		this.#logger = logger;
+		this.#platform = platform;
 
 		this.#exited = new Promise<ProcessExit>((resolve) => {
 			const settle = (exit: ProcessExit): void => {
@@ -135,7 +140,7 @@ class NodeManagedProcess implements ManagedProcess {
 		}
 
 		this.#logger?.warn("provider process did not respond to SIGTERM; force killing");
-		this.#signal("SIGKILL");
+		this.#forceKill();
 		return this.#exited;
 	}
 
@@ -145,6 +150,25 @@ class NodeManagedProcess implements ManagedProcess {
 		} catch (error) {
 			this.#logger?.debug(`failed to send ${signal}`, error);
 		}
+	}
+
+	/**
+	 * On Windows a batch launcher means the CLI is our *grandchild*, and killing
+	 * `cmd.exe` leaves it running with the pipes still open. `taskkill /t` takes
+	 * the tree, so a restart does not accumulate orphaned app-servers.
+	 */
+	#forceKill(): void {
+		const pid = this.#child.pid;
+		if (this.#platform !== "win32" || pid === undefined) {
+			this.#signal("SIGKILL");
+			return;
+		}
+		execFile("taskkill", ["/pid", String(pid), "/t", "/f"], (error) => {
+			if (error !== null) {
+				this.#logger?.debug("taskkill failed", error);
+				this.#signal("SIGKILL");
+			}
+		});
 	}
 }
 
@@ -173,15 +197,87 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | type
  * unhandled `error` event.
  */
 export function spawnManagedProcess(options: SpawnOptions): ManagedProcess {
-	const child = spawn(options.command, [...(options.args ?? [])], {
+	const platform = options.platform ?? process.platform;
+	const env = options.env ?? process.env;
+	const invocation = buildSpawnInvocation(options.command, [...(options.args ?? [])], {
+		platform,
+		env,
+	});
+
+	const child = spawn(invocation.command, [...invocation.args], {
 		cwd: options.cwd,
-		env: options.env ?? process.env,
+		env,
 		stdio: ["pipe", "pipe", "pipe"],
 		windowsHide: true,
 		shell: false,
+		...(invocation.windowsVerbatimArguments === true ? { windowsVerbatimArguments: true } : {}),
 	}) as ChildProcessWithoutNullStreams;
 
-	return new NodeManagedProcess(child, options.command, options.shutdownGraceMs ?? 3_000, options.logger);
+	// Errors keep naming the command the caller asked for, not the launcher.
+	return new NodeManagedProcess(
+		child,
+		options.command,
+		options.shutdownGraceMs ?? 3_000,
+		options.logger,
+		platform,
+	);
+}
+
+export interface SpawnInvocation {
+	command: string;
+	args: readonly string[];
+	windowsVerbatimArguments?: boolean;
+}
+
+const WINDOWS_BATCH_FILE = /\.(?:bat|cmd)$/i;
+/** Everything `cmd.exe` treats as syntax rather than as text. */
+const CMD_META_CHARS = /([()[\]{}%!^"`<>&|;, *?])/g;
+
+/**
+ * Decides what actually gets handed to `CreateProcess`.
+ *
+ * npm installs a CLI on Windows as `<name>.cmd`, and a batch file is not an
+ * executable image: `CreateProcess` cannot run it, and Node refuses to spawn one
+ * without a shell at all. So the common case — a CLI that works perfectly in the
+ * user's terminal — has to be launched through `cmd.exe`.
+ *
+ * `cmd.exe /d /s /c` with an explicitly built, fully escaped command line is used
+ * rather than `shell: true`, so the quoting happens here where the pieces are
+ * known, instead of by string concatenation somewhere in between.
+ */
+export function buildSpawnInvocation(
+	command: string,
+	args: readonly string[],
+	options: { platform?: NodeJS.Platform; env?: NodeJS.ProcessEnv } = {},
+): SpawnInvocation {
+	const platform = options.platform ?? process.platform;
+	if (platform !== "win32" || !WINDOWS_BATCH_FILE.test(command)) {
+		return { command, args };
+	}
+
+	const env = options.env ?? process.env;
+	const comspec = env.ComSpec ?? env.COMSPEC ?? "cmd.exe";
+	// The batch file is parsed by cmd a second time once it starts, so its
+	// arguments carry one more layer of escaping than the command itself.
+	const line = [escapeForCmd(command, false), ...args.map((argument) => escapeForCmd(argument, true))].join(
+		" ",
+	);
+
+	// `/d` skips AutoRun scripts, `/s` makes cmd strip exactly the outer quotes.
+	return {
+		command: comspec,
+		args: ["/d", "/s", "/c", `"${line}"`],
+		windowsVerbatimArguments: true,
+	};
+}
+
+function escapeForCmd(value: string, doubleEscape: boolean): string {
+	// The C runtime's rules first: a backslash run only matters before a quote,
+	// and a quote inside the value has to reach the child as data.
+	const quoted = `"${value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\*)$/, "$1$1")}"`;
+	// Then cmd's own, which apply before the child ever sees a command line.
+	const escaped = quoted.replace(CMD_META_CHARS, "^$1");
+	return doubleEscape ? escaped.replace(CMD_META_CHARS, "^$1") : escaped;
 }
 
 /** Translates a Node spawn failure into the typed error surface (instructions §10). */

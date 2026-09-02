@@ -10,9 +10,9 @@
  */
 
 import { execFile } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { accessSync, constants, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -43,12 +43,18 @@ function section(name) {
 	console.log("-".repeat(name.length));
 }
 
-function run(command, args, { timeoutMs = 8000, env } = {}) {
+function run(command, args, { timeoutMs = 8000, env, spawnOptions } = {}) {
 	return new Promise((resolve) => {
 		execFile(
 			command,
 			args,
-			{ timeout: timeoutMs, windowsHide: true, maxBuffer: 4 * 1024 * 1024, env: { ...process.env, ...env } },
+			{
+				timeout: timeoutMs,
+				windowsHide: true,
+				maxBuffer: 4 * 1024 * 1024,
+				env: { ...process.env, ...env },
+				...spawnOptions,
+			},
 			(error, stdout, stderr) => {
 				resolve({
 					ok: error === null,
@@ -60,6 +66,93 @@ function run(command, args, { timeoutMs = 8000, env } = {}) {
 			},
 		);
 	});
+}
+
+// ------------------------------------------------------------- finding a CLI
+
+/**
+ * Where a command actually lives, PATHEXT included.
+ *
+ * `execFile` does not apply PATHEXT: on Windows the npm-installed CLI is
+ * `codex.cmd`, so looking for a bare `codex` reports "not on PATH" on a machine
+ * where `codex --version` works perfectly in a terminal. This is deliberately a
+ * second implementation of src/infrastructure/executable.ts — a doctor that
+ * shared the plugin's lookup would agree with it about a broken install.
+ */
+function resolveCommand(command) {
+	const extensions = IS_WINDOWS
+		? (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter((ext) => ext.length > 0)
+		: [""];
+	const candidates = (base) => (IS_WINDOWS ? [base, ...extensions.map((ext) => `${base}${ext}`)] : [base]);
+	const isFile = (candidate) => {
+		try {
+			if (!statSync(candidate).isFile()) {
+				return false;
+			}
+			accessSync(candidate, constants.X_OK);
+			return true;
+		} catch {
+			return false;
+		}
+	};
+
+	if (command.includes("/") || command.includes("\\")) {
+		return candidates(command).find(isFile);
+	}
+	for (const dir of (process.env.PATH ?? process.env.Path ?? "").split(delimiter)) {
+		if (dir.length === 0) {
+			continue;
+		}
+		const found = candidates(join(dir, command)).find(isFile);
+		if (found !== undefined) {
+			return found;
+		}
+	}
+	return undefined;
+}
+
+/** The places a CLI ends up when the installer never touched PATH. */
+function findOffPath(command) {
+	const home = homedir();
+	const roots = IS_WINDOWS
+		? [
+				join(process.env.APPDATA ?? join(home, "AppData", "Roaming"), "npm"),
+				join(process.env.LOCALAPPDATA ?? join(home, "AppData", "Local"), "npm"),
+				join(process.env.ProgramFiles ?? "C:\\Program Files", "nodejs"),
+				join(home, ".cargo", "bin"),
+			]
+		: [
+				"/usr/local/bin",
+				"/opt/homebrew/bin",
+				join(home, ".local", "bin"),
+				join(home, ".npm-global", "bin"),
+				join(home, ".cargo", "bin"),
+			];
+	for (const root of roots) {
+		const found = resolveCommand(join(root, command));
+		if (found !== undefined) {
+			return found;
+		}
+	}
+	return undefined;
+}
+
+/**
+ * What to hand `execFile` for a resolved path.
+ *
+ * A `.cmd` shim is not an executable image — `CreateProcess` cannot run it and
+ * Node refuses to spawn one without a shell — so it goes through `cmd.exe`, the
+ * same way the plugin launches it.
+ */
+function invocation(resolved, args) {
+	if (IS_WINDOWS && /\.(?:bat|cmd)$/i.test(resolved)) {
+		return {
+			command: process.env.ComSpec ?? "cmd.exe",
+			args: ["/d", "/s", "/c", `"${[resolved, ...args].map((part) => `"${part}"`).join(" ")}"`],
+			options: { windowsVerbatimArguments: true },
+		};
+	}
+	return { command: resolved, args, options: {} };
 }
 
 // ------------------------------------------------------------------- the checks
@@ -153,8 +246,10 @@ function checkStreamDeck() {
 
 async function checkCodex() {
 	section("Codex");
-	const version = await run("codex", ["--version"]);
-	if (version.missing) {
+
+	const onPath = resolveCommand("codex");
+	const resolved = onPath ?? findOffPath("codex");
+	if (resolved === undefined) {
 		report(
 			FAIL,
 			"Codex CLI",
@@ -164,11 +259,30 @@ async function checkCodex() {
 		);
 		return;
 	}
-	report(version.ok ? OK : WARN, "Codex CLI", version.stdout.trim() || `exit ${version.code}`);
+	if (onPath === undefined) {
+		// Installed, but the plugin inherits Stream Deck's PATH, not a terminal's.
+		report(
+			WARN,
+			"Codex CLI",
+			`found at ${resolved}, but not on PATH`,
+			"Paste this into Codex executable in any AgentDeck Property Inspector\n" +
+				`under Plugin settings:\n${resolved}`,
+		);
+	}
+
+	const start = invocation(resolved, ["--version"]);
+	const version = await run(start.command, start.args, { spawnOptions: start.options });
+	if (onPath !== undefined) {
+		report(
+			version.ok ? OK : WARN,
+			"Codex CLI",
+			`${version.stdout.trim() || `exit ${version.code}`} (${resolved})`,
+		);
+	}
 
 	// The handshake is the real test: a CLI that answers `--version` can still be
 	// too old for `app-server`, which is the only interface AgentDeck uses.
-	const handshake = await probeAppServer();
+	const handshake = await probeAppServer(resolved);
 	report(
 		handshake.ok ? OK : FAIL,
 		"codex app-server --stdio",
@@ -187,9 +301,10 @@ async function checkCodex() {
 }
 
 /** One real handshake, then `account/read`, then close. */
-function probeAppServer() {
+function probeAppServer(resolved) {
 	return new Promise((resolve) => {
-		const child = execFile("codex", ["app-server", "--stdio"], { windowsHide: true }, () => {});
+		const start = invocation(resolved, ["app-server", "--stdio"]);
+		const child = execFile(start.command, start.args, { windowsHide: true, ...start.options }, () => {});
 		let buffer = "";
 		let settled = false;
 

@@ -62,6 +62,12 @@ doctor は失敗する順番どおりに確認する。Codex については
 `--version` が通るだけでは足りないので、実際に `app-server` の
 ハンドシェイクまで往復してからサインイン状態を見る。
 
+Windows で `codex` は `codex.cmd` として入る。doctor は PATHEXT を辿って
+探すので、PATH に無くても `%APPDATA%\npm` などの標準の場所にあれば
+見つけて絶対パスを表示する。ターミナルで `codex` が動くのに doctor が
+`not on PATH` と言う場合は、表示されたパスを Plugin settings の
+**Codex CLI** に貼れば済む。
+
 ---
 
 ## 3. キーを置く
@@ -262,19 +268,19 @@ Prompt キーの Property Inspector 下部、**Presets** にJSONで書く。
 
 ## 8. 困ったとき — デッキの表示から引く
 
-| 表示       | 意味                           | 対処                                                            |
-| ---------- | ------------------------------ | --------------------------------------------------------------- |
-| `CLI?`     | Codex CLI が PATH に無い       | インストールするか、Plugin settings の Codex CLI にパスを入れる |
-| `LOGIN`    | Codex にサインインしていない   | `codex` を一度実行してサインイン                                |
-| `SETUP`    | Claude bridge が未設定         | 手順6                                                           |
-| `OFFLINE`  | app-server が落ちた            | 自動で再接続する。繰り返すなら `npm run doctor`                 |
-| `STALE`    | 取得に失敗し、直前の値を表示中 | Claude なら Claude Code が閉じている。Codex なら接続を確認      |
-| `LIMIT`    | Rate limit に到達              | 待つ                                                            |
-| `NO GIT`   | 指定パスがリポジトリではない   | Repository のパス、または Active Project を確認                 |
-| `NO PROJ`  | Project が未登録               | Project キーの Add path から登録                                |
-| `no diff`  | git が diff を返せなかった     | コミットが1つも無いリポジトリでは出る                           |
-| キーが減光 | その操作の対象が無い           | Stop なら実行中Turnが無い、Approve なら承認待ちが無い           |
-| 何も出ない | Pluginが起動していない         | `npm run doctor` の Stream Deck 項目を確認                      |
+| 表示       | 意味                           | 対処                                                                                |
+| ---------- | ------------------------------ | ----------------------------------------------------------------------------------- |
+| `CLI?`     | Codex CLI が見つからない       | `npm run doctor` が実際のパスを表示する。それを Plugin settings の Codex CLI に貼る |
+| `LOGIN`    | Codex にサインインしていない   | `codex` を一度実行してサインイン                                                    |
+| `SETUP`    | Claude bridge が未設定         | 手順6                                                                               |
+| `OFFLINE`  | app-server が落ちた            | 自動で再接続する。繰り返すなら `npm run doctor`                                     |
+| `STALE`    | 取得に失敗し、直前の値を表示中 | Claude なら Claude Code が閉じている。Codex なら接続を確認                          |
+| `LIMIT`    | Rate limit に到達              | 待つ                                                                                |
+| `NO GIT`   | 指定パスがリポジトリではない   | Repository のパス、または Active Project を確認                                     |
+| `NO PROJ`  | Project が未登録               | Project キーの Add path から登録                                                    |
+| `no diff`  | git が diff を返せなかった     | コミットが1つも無いリポジトリでは出る                                               |
+| キーが減光 | その操作の対象が無い           | Stop なら実行中Turnが無い、Approve なら承認待ちが無い                               |
+| 何も出ない | Pluginが起動していない         | `npm run doctor` の Stream Deck 項目を確認                                          |
 
 それでも分からないときは、Plugin settings の **Debug logging** を有効にして
 `%APPDATA%\Elgato\StreamDeck\logs\` のログを見る。

@@ -449,7 +449,12 @@ export class CodexProvider implements AgentProvider {
 		this.#setState("starting");
 		const command = this.#executable();
 
-		if (this.#resolve(command, { env: this.#options.env }) === undefined) {
+		// The *resolved* path is what gets spawned. On Windows the CLI is usually
+		// `codex.cmd`, and `CreateProcess` does not apply PATHEXT — spawning the
+		// bare name fails with ENOENT on a machine where `codex --version` works
+		// perfectly in a terminal, and the deck shows CLI? for no visible reason.
+		const resolved = this.#resolve(command, { env: this.#options.env });
+		if (resolved === undefined) {
 			this.#recordError(new AgentDeckError("CLI_NOT_FOUND", `Codex CLI not found on PATH: ${command}`));
 			this.#setState("stopped");
 			this.#emitHealth();
@@ -459,7 +464,7 @@ export class CodexProvider implements AgentProvider {
 
 		let connection: Connection | undefined;
 		try {
-			connection = this.#connect(command);
+			connection = this.#connect(resolved);
 			this.#connection = connection;
 			this.#setState("initializing");
 
