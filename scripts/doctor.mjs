@@ -253,9 +253,11 @@ async function checkCodex() {
 		report(
 			FAIL,
 			"Codex CLI",
-			"not on PATH",
-			"Install the Codex CLI, or set an executable override in any\n" +
-				"AgentDeck Property Inspector under Plugin settings.",
+			"not installed",
+			"npm i -g @openai/codex\n" +
+				"Already installed elsewhere? Put its full path in Codex CLI, in any\n" +
+				"AgentDeck Property Inspector under Plugin settings.\n" +
+				"Using Claude only? Safe to ignore — every key except the Codex ones works.",
 		);
 		return;
 	}
@@ -560,7 +562,9 @@ console.log(
 	`${results.length - failed.length - warned.length} ok, ${warned.length} warning(s), ${failed.length} failure(s)`,
 );
 if (failed.length > 0) {
-	console.log("\nFix the failures above before testing on the device.");
+	// Named, because not every failure blocks every setup: a missing Codex CLI
+	// stops nothing for someone who only uses Claude.
+	console.log(`\nBlocking: ${failed.map((entry) => entry.title).join(", ")}`);
 } else if (warned.length > 0) {
 	console.log("\nNothing is broken. Each warning names what it disables.");
 } else {
